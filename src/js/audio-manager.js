@@ -66,19 +66,18 @@ export class AudioManager {
   }
 
   connectNodes() {
-    // Connect filters in series
-    let prevNode = this.ctx.destination;
-    this.filters.forEach(filter => {
-      prevNode.connect(filter);
-      prevNode = filter;
-    });
-    
-    // Connect analyser to the first filter
-    this.analyser.connect(this.filters[0]);
-    
-    // Connect the last filter to destination
     if (this.filters.length > 0) {
+      // Chain filters in order
+      for (let i = 0; i < this.filters.length - 1; i++) {
+        this.filters[i].connect(this.filters[i + 1]);
+      }
+
+      // Connect analyser to the first filter and last filter to destination
+      this.analyser.connect(this.filters[0]);
       this.filters[this.filters.length - 1].connect(this.ctx.destination);
+    } else {
+      // Fallback: connect analyser directly to destination
+      this.analyser.connect(this.ctx.destination);
     }
   }
 
@@ -149,8 +148,7 @@ export class AudioManager {
     // Create new source from existing audio element
     this.source = this.ctx.createMediaElementSource(track.audio);
 
-    // Connect the source to the filter chain and analyser
-    this.source.connect(this.filters[0]);
+    // Route audio through analyser (connected to EQ chain)
     this.source.connect(this.analyser);
     
     track.audio.currentTime = 0;
