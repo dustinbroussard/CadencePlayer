@@ -6,7 +6,8 @@
   "scripts": {
     "start": "electron .",
     "dev": "NODE_ENV=development electron .",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "test": "vitest run"
   },
   "keywords": [
     "electron",
@@ -20,7 +21,8 @@
   "devDependencies": {
     "electron": "^30.0.0",
     "electron-builder": "^24.13.3",
-    "electron-reload": "^2.0.0-alpha.1"
+    "electron-reload": "^2.0.0-alpha.1",
+    "vitest": "^3.2.4"
   },
   "build": {
     "appId": "com.codemaniac.cadence",

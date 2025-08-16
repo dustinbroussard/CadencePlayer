@@ -111,7 +111,8 @@ export class ChordDetector {
   _pcToName(pc) {
     // Prefer flats for black keys to feel more guitar-friendly
     const names = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
-    return names[pc];
+    const idx = ((pc % 12) + 12) % 12;
+    return names[idx];
   }
 
   _rotate(arr, n) {

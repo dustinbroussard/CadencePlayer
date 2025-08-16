@@ -1,0 +1,45 @@
+import { describe, it, expect } from 'vitest';
+import { ChordDetector } from '../src/js/chord-detector.js';
+
+describe('ChordDetector', () => {
+  it('detects a C major chord from synthetic data', () => {
+    const fftSize = 16384;
+    const binsLength = fftSize / 2;
+    const fakeBins = new Float32Array(binsLength).fill(-Infinity);
+
+    const sampleRate = 44100;
+    const binHz = sampleRate / (2 * binsLength);
+    const freqToIndex = (f) => Math.round(f / binHz);
+    [261.63, 329.63, 392.0].forEach((freq) => {
+      fakeBins[freqToIndex(freq)] = 0;
+    });
+
+    const analyser = {
+      fftSize,
+      getFloatFrequencyData: (arr) => arr.set(fakeBins)
+    };
+
+    const detector = new ChordDetector(analyser, {
+      sampleRate,
+      minConfidence: 0,
+      holdMs: 0
+    });
+
+    let detected = null;
+    detector.setOnChord((chord) => {
+      detected = chord;
+    });
+
+    detector.update();
+
+    expect(detected).not.toBeNull();
+    expect(detected.name).toBe('C maj');
+  });
+
+  it('pcToName wraps out-of-range values', () => {
+    const analyser = { fftSize: 2048, getFloatFrequencyData: () => {} };
+    const detector = new ChordDetector(analyser);
+    expect(detector._pcToName(12)).toBe('C');
+    expect(detector._pcToName(-1)).toBe('B');
+  });
+});
