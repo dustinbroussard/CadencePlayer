@@ -12,6 +12,7 @@ export class ChordDetector {
     this.maxFreq = opts.maxFreq || 5000;  // chords are clearest below ~5kHz
     this.holdMs  = opts.holdMs  || 120;   // display hold to reduce flicker
     this.minConfidence = opts.minConfidence || 0.22;
+    this.extRatio = opts.extRatio || 0.3; // relative energy for extensions
 
     // Create major/minor templates (Krumhansl-ish, normalized)
     // Root=1.0, major third & fifth emphasized; likewise for minor.
@@ -55,7 +56,29 @@ export class ChordDetector {
     const bestTemplate = this._rotate(bestQual === 'maj' ? this.majorTemplate : this.minorTemplate, bestRoot);
     const confidence = this._dot(normChroma, bestTemplate);
 
-    const chordName = `${this._pcToName(bestRoot)} ${bestQual}`;
+    // Determine extensions (7ths, 9ths)
+    const triadMax = Math.max(
+      chroma[bestRoot],
+      chroma[(bestRoot + (bestQual === 'maj' ? 4 : 3)) % 12],
+      chroma[(bestRoot + 7) % 12]
+    );
+    const extThresh = triadMax * this.extRatio;
+    const hasDom7 = chroma[(bestRoot + 10) % 12] >= extThresh;
+    const hasMaj7 = chroma[(bestRoot + 11) % 12] >= extThresh;
+    const has9 = chroma[(bestRoot + 2) % 12] >= extThresh;
+
+    let quality = bestQual;
+    if (bestQual === 'maj') {
+      if (hasDom7) quality = has9 ? '9' : '7';
+      else if (hasMaj7) quality = has9 ? 'maj9' : 'maj7';
+      else if (has9) quality = 'add9';
+    } else {
+      if (hasDom7) quality = has9 ? 'min9' : 'min7';
+      else if (hasMaj7) quality = has9 ? 'minMaj9' : 'minMaj7';
+      else if (has9) quality = 'madd9';
+    }
+
+    const chordName = `${this._pcToName(bestRoot)} ${quality}`;
     const now = performance.now();
 
     if (!this.lastChord || (chordName !== this.lastChord && (now - this.lastChangeTime) > this.holdMs)) {

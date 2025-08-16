@@ -277,6 +277,20 @@ body.drag-over .app-container {
   color: var(--text-secondary);
 }
 
+.chord-readout {
+  margin-top: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
+}
+.chord-readout.pulse { box-shadow: 0 0 12px var(--playing-border); }
+
 .player-controls {
   flex-basis: 50%;
   display: flex;

@@ -1,7 +1,17 @@
 export class AudioManager {
   constructor() {
     this.ctx = new AudioContext();
+
+    // Visual analyser (byte data for the visualizer)
     this.analyser = this.ctx.createAnalyser();
+    this.analyser.fftSize = 2048;
+    this.analyser.smoothingTimeConstant = 0.8;
+
+    // Chord analyser (high resolution FFT)
+    this.chordAnalyser = this.ctx.createAnalyser();
+    this.chordAnalyser.fftSize = 16384;
+    this.chordAnalyser.smoothingTimeConstant = 0.8;
+
     this.source = null;
     this.queue = [];
     this.currentIndex = -1;
@@ -65,20 +75,32 @@ export class AudioManager {
     return this.currentIndex;
   }
 
+  getChordAnalyser() {
+    return this.chordAnalyser;
+  }
+
   connectNodes() {
-    if (this.filters.length > 0) {
-      // Chain filters in order
+    // Build EQ chain (filters in series) → destination
+    if (this.filters.length > 1) {
       for (let i = 0; i < this.filters.length - 1; i++) {
         this.filters[i].connect(this.filters[i + 1]);
       }
-
-      // Connect analyser to the first filter and last filter to destination
-      this.analyser.connect(this.filters[0]);
-      this.filters[this.filters.length - 1].connect(this.ctx.destination);
-    } else {
-      // Fallback: connect analyser directly to destination
-      this.analyser.connect(this.ctx.destination);
     }
+    const eqInput = this.filters[0] || null;
+    const eqOutput = this.filters[this.filters.length - 1] || null;
+    if (eqOutput) eqOutput.connect(this.ctx.destination);
+
+    // Create a master gain as the tee point for analysers + EQ
+    this.masterGain = this.ctx.createGain();
+    this.masterGain.gain.value = 1;
+
+    // masterGain -> EQ input (if any)
+    if (eqInput) this.masterGain.connect(eqInput);
+    else this.masterGain.connect(this.ctx.destination);
+
+    // Also feed both analysers in parallel
+    this.masterGain.connect(this.analyser);
+    this.masterGain.connect(this.chordAnalyser);
   }
 
   async addFilesToQueue(files) {
@@ -148,8 +170,8 @@ export class AudioManager {
     // Create new source from existing audio element
     this.source = this.ctx.createMediaElementSource(track.audio);
 
-    // Route audio through analyser (connected to EQ chain)
-    this.source.connect(this.analyser);
+    // Route audio into master gain (which fans out to EQ + analysers)
+    this.source.connect(this.masterGain);
     
     track.audio.currentTime = 0;
     track.audio.play();
