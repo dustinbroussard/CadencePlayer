@@ -1,0 +1,498 @@
+/* --------------------------------------------------------------------------------
+ * Global & Resets
+ * -------------------------------------------------------------------------------- */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
+:root {
+  --bg-color: #0c0c0c;
+  --bg-gradient: linear-gradient(135deg, #0c0c0c 0%, #1a1a2e 50%, #16213e 100%);
+  --sidebar-bg: rgba(17, 17, 17, 0.5);
+  --header-bg: rgba(17, 17, 17, 0.9);
+  --text-color: #f0f0f0;
+  --text-secondary: #aaaaaa;
+  --accent-color: #4CAF50;
+  --btn-bg: rgba(45, 45, 45, 0.7);
+  --btn-hover-bg: rgba(68, 68, 68, 0.8);
+  --border-color: rgba(255, 255, 255, 0.1);
+  --playing-bg: rgba(76, 175, 80, 0.1);
+  --playing-border: rgba(76, 175, 80, 0.5);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Poppins', sans-serif;
+  background: var(--bg-gradient);
+  color: var(--text-color);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+body.dark-mode {
+  --bg-color: #f0f0f0;
+  --bg-gradient: linear-gradient(135deg, #e0e0e0 0%, #f0f0f0 50%, #ffffff 100%);
+  --sidebar-bg: rgba(240, 240, 240, 0.8);
+  --header-bg: rgba(255, 255, 255, 0.9);
+  --text-color: #333;
+  --text-secondary: #666;
+  --accent-color: #4CAF50;
+  --btn-bg: rgba(220, 220, 220, 0.7);
+  --btn-hover-bg: rgba(200, 200, 200, 0.8);
+  --border-color: rgba(0, 0, 0, 0.1);
+  --playing-bg: rgba(76, 175, 80, 0.1);
+  --playing-border: rgba(76, 175, 80, 0.5);
+}
+
+body.drag-over .app-container {
+  border: 4px dashed var(--accent-color);
+  background: rgba(76, 175, 80, 0.1);
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* --------------------------------------------------------------------------------
+ * Title Bar (Custom Electron Frame)
+ * -------------------------------------------------------------------------------- */
+.titlebar {
+  -webkit-app-region: drag;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 10px;
+  height: 35px;
+  background: var(--header-bg);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border-color);
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+}
+
+.titlebar-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-color);
+}
+
+.titlebar-controls {
+  -webkit-app-region: no-drag;
+}
+
+.titlebar-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-color);
+  font-size: 20px;
+  width: 40px;
+  height: 34px;
+  cursor: pointer;
+  transition: background 0.2s;
+  opacity: 0.7;
+}
+
+.titlebar-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  opacity: 1;
+}
+
+.titlebar-btn.close-btn:hover {
+  background: #e74c3c;
+  color: white;
+}
+
+/* --------------------------------------------------------------------------------
+ * Layout
+ * -------------------------------------------------------------------------------- */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 35px);
+  margin-top: 35px;
+  padding: 20px;
+  gap: 20px;
+  transition: border 0.3s ease;
+}
+
+.top-section {
+  flex-grow: 1;
+  display: flex;
+  gap: 20px;
+  min-height: 0;
+}
+
+.sidebar {
+  width: 300px;
+  background: var(--sidebar-bg);
+  backdrop-filter: blur(10px);
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow: hidden;
+}
+
+.main-content {
+  flex-grow: 1;
+  background: var(--sidebar-bg);
+  backdrop-filter: blur(10px);
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.player-bar-container {
+  background: var(--sidebar-bg);
+  backdrop-filter: blur(10px);
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  padding: 15px 30px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 90px;
+}
+
+/* --------------------------------------------------------------------------------
+ * Sidebar and Queue
+ * -------------------------------------------------------------------------------- */
+.file-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.queue-list {
+  flex-grow: 1;
+  list-style: none;
+  overflow-y: auto;
+  padding-right: 10px;
+}
+
+.queue-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.queue-list::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.queue-item {
+  padding: 10px 15px;
+  margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.2s, background 0.2s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  position: relative;
+  border: 1px solid transparent;
+}
+
+.queue-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateX(5px);
+}
+
+.queue-item.playing {
+  background: var(--playing-bg);
+  border-color: var(--playing-border);
+  box-shadow: 0 0 15px var(--playing-border);
+  position: relative;
+}
+
+.queue-item.playing::before {
+  content: '▶';
+  position: absolute;
+  left: -15px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--accent-color);
+  font-size: 14px;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* --------------------------------------------------------------------------------
+ * Visualizer
+ * -------------------------------------------------------------------------------- */
+#visualizer-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.visualizer-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* --------------------------------------------------------------------------------
+ * Player Bar
+ * -------------------------------------------------------------------------------- */
+.track-info {
+  flex-basis: 25%;
+  min-width: 0;
+}
+
+.track-name {
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-color);
+}
+
+.track-duration {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.player-controls {
+  flex-basis: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.control-group {
+  display: flex;
+  gap: 15px;
+}
+
+.player-control-btn {
+  background: var(--btn-bg);
+  border: none;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  color: var(--text-color);
+  cursor: pointer;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.player-control-btn:hover {
+  background: var(--btn-hover-bg);
+  transform: scale(1.05);
+}
+
+.player-control-btn.main-btn {
+  width: 50px;
+  height: 50px;
+  background: var(--accent-color);
+  color: white;
+}
+
+.player-control-btn.main-btn:hover {
+  background: var(--accent-color);
+  transform: scale(1.1);
+}
+
+.player-control-btn.toggle-btn.inactive {
+  opacity: 0.5;
+}
+
+.player-control-btn.toggle-btn.inactive:hover {
+  opacity: 1;
+}
+
+.progress-container {
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+
+.progress-bar {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 5px;
+  cursor: pointer;
+  outline: none;
+  transition: background 0.2s;
+}
+
+.progress-bar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  background: var(--accent-color);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.progress-bar::-moz-range-thumb {
+  width: 15px;
+  height: 15px;
+  background: var(--accent-color);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.volume-and-eq {
+  flex-basis: 25%;
+  display: flex;
+  justify-content: flex-end;
+  gap: 20px;
+  align-items: center;
+}
+
+.volume-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100px;
+}
+
+.volume-slider {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  background: var(--text-color);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.volume-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  background: var(--text-color);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.eq-controls-container {
+  position: relative;
+}
+
+.eq-controls {
+  position: absolute;
+  bottom: 60px;
+  right: 0;
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  background: var(--sidebar-bg);
+  backdrop-filter: blur(10px);
+  padding: 15px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  z-index: 10;
+  transition: transform 0.3s ease-out, opacity 0.3s ease-out;
+}
+
+.eq-controls.hidden {
+  transform: translateY(20px);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.slider-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+.eq-slider {
+  width: 8px;
+  height: 100px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+  cursor: pointer;
+  writing-mode: vertical-lr;
+  direction: rtl;
+}
+
+.eq-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  background: var(--accent-color);
+  border-radius: 50%;
+  border: none;
+  margin-left: -4px;
+}
+
+.freq-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+
+/* --------------------------------------------------------------------------------
+ * UI Elements
+ * -------------------------------------------------------------------------------- */
+.material-symbols-outlined {
+  font-variation-settings:
+    'FILL' 0,
+    'wght' 400,
+    'GRAD' 0,
+    'opsz' 24
+}
+
+.control-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 15px;
+  background: var(--btn-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-color);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.control-btn:hover {
+  background: var(--btn-hover-bg);
+  transform: translateY(-2px);
+}

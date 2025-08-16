@@ -1,0 +1,45 @@
+{
+  "name": "cadence-player-enhanced",
+  "version": "2.0.0",
+  "description": "An enhanced Electron music player with a custom visualizer and modern UI/UX.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "NODE_ENV=development electron .",
+    "dist": "electron-builder"
+  },
+  "keywords": [
+    "electron",
+    "music",
+    "player",
+    "audio",
+    "visualizer"
+  ],
+  "author": "Code Maniac",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3",
+    "electron-reload": "^2.0.0-alpha.1"
+  },
+  "build": {
+    "appId": "com.codemaniac.cadence",
+    "productName": "Cadence Player",
+    "linux": {
+      "target": "AppImage",
+      "category": "AudioVideo"
+    },
+    "mac": {
+      "category": "public.app-category.music"
+    },
+    "win": {
+      "target": "nsis"
+    },
+    "files": [
+      "main.js",
+      "index.html",
+      "src/**/*",
+      "assets/**/*"
+    ]
+  }
+}

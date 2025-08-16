@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Cadence Player</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="src/css/styles.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+</head>
+<body>
+  <div class="titlebar">
+    <div class="titlebar-title">
+      <span class="material-symbols-outlined">
+        radio
+      </span>
+      <span>Cadence Player</span>
+    </div>
+    <div class="titlebar-controls">
+      <button id="minimize-btn" class="titlebar-btn">
+        <span class="material-symbols-outlined">minimize</span>
+      </button>
+      <button id="maximize-btn" class="titlebar-btn">
+        <span class="material-symbols-outlined">crop_square</span>
+      </button>
+      <button id="close-btn" class="titlebar-btn close-btn">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="app-container">
+    <div class="top-section">
+      <div class="sidebar">
+        <div class="file-actions">
+          <button id="add-files-btn" class="control-btn">
+            <span class="material-symbols-outlined">
+              add_circle
+            </span>
+            Add Files
+          </button>
+          <button id="clear-queue-btn" class="control-btn">
+            <span class="material-symbols-outlined">
+              playlist_remove
+            </span>
+            Clear Queue
+          </button>
+          <button id="dark-mode-toggle" class="control-btn toggle-btn">
+            <span class="material-symbols-outlined light-icon">
+              light_mode
+            </span>
+            <span class="material-symbols-outlined dark-icon">
+              dark_mode
+            </span>
+          </button>
+        </div>
+        <ul id="queue" class="queue-list"></ul>
+      </div>
+
+      <div class="main-content">
+        <div id="visualizer-container">
+          <canvas id="visualizer" class="visualizer-canvas"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <div class="player-bar-container">
+      <div class="track-info">
+        <div id="current-track-name" class="track-name">No track loaded</div>
+        <div id="current-track-duration" class="track-duration"></div>
+      </div>
+
+      <div class="player-controls">
+        <div class="control-group">
+          <button id="shuffle-btn" class="player-control-btn toggle-btn inactive">
+            <span class="material-symbols-outlined">
+              shuffle
+            </span>
+          </button>
+          <button id="prev-btn" class="player-control-btn">
+            <span class="material-symbols-outlined">
+              skip_previous
+            </span>
+          </button>
+          <button id="play-pause-btn" class="player-control-btn main-btn">
+            <span id="play-icon" class="material-symbols-outlined">
+              play_arrow
+            </span>
+            <span id="pause-icon" class="material-symbols-outlined hidden">
+              pause
+            </span>
+          </button>
+          <button id="next-btn" class="player-control-btn">
+            <span class="material-symbols-outlined">
+              skip_next
+            </span>
+          </button>
+          <button id="repeat-btn" class="player-control-btn toggle-btn inactive">
+            <span class="material-symbols-outlined">
+              repeat
+            </span>
+          </button>
+        </div>
+        <div id="progress-container" class="progress-container">
+          <input type="range" id="progress-bar" value="0" min="0" max="100" class="progress-bar">
+        </div>
+      </div>
+
+      <div class="volume-and-eq">
+        <div class="volume-control">
+          <span class="material-symbols-outlined">
+            volume_up
+          </span>
+          <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="1" class="volume-slider">
+        </div>
+        <div class="eq-controls-container">
+          <button id="toggle-eq-btn" class="player-control-btn">
+            <span class="material-symbols-outlined">
+              equalizer
+            </span>
+          </button>
+          <div id="eq-controls" class="eq-controls hidden"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="src/js/renderer.js" type="module"></script>
+</body>
+</html>
