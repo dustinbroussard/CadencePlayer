@@ -1,10 +1,14 @@
 import { AudioManager } from './audio-manager.js';
 import { Visualizer } from './visualizer.js';
+import { ChordDetector } from './chord-detector.js';
 
 class Renderer {
   constructor() {
     this.audioManager = new AudioManager();
     this.visualizer = new Visualizer('visualizer', this.audioManager.getAnalyser());
+    this.chordDetector = new ChordDetector(this.audioManager.getChordAnalyser(), {
+      sampleRate: this.audioManager.ctx.sampleRate
+    });
     
     // UI Elements
     this.addFilesBtn = document.getElementById('add-files-btn');
@@ -12,6 +16,7 @@ class Renderer {
     this.queueEl = document.getElementById('queue');
     this.trackNameEl = document.getElementById('current-track-name');
     this.trackDurationEl = document.getElementById('current-track-duration');
+    this.chordReadout = document.getElementById('chord-readout');
     this.playPauseBtn = document.getElementById('play-pause-btn');
     this.playIcon = document.getElementById('play-icon');
     this.pauseIcon = document.getElementById('pause-icon');
@@ -33,6 +38,17 @@ class Renderer {
     this.initEventListeners();
     this.initEqControls();
     this.initDragAndDrop();
+
+    // Start chord detector loop
+    this.chordDetector.setOnChord(({ name, confidence }) => {
+      if (this.chordReadout) {
+        const conf = Math.round(confidence * 100);
+        this.chordReadout.textContent = `${name}  ·  ${conf}%`;
+        this.chordReadout.classList.add('pulse');
+        setTimeout(() => this.chordReadout && this.chordReadout.classList.remove('pulse'), 120);
+      }
+    });
+    this.chordDetector.start();
   }
 
   initEventListeners() {
