@@ -55,6 +55,11 @@ class Renderer {
       } else {
         const conf = Math.round(confidence * 100);
         this.chordReadout.textContent = `${name}  ·  ${conf}%`;
+        if (conf >= 62) {  // Match confEnter threshold of 0.62
+            this.chordReadout.style.color = '#4ade80'; // green-400
+        } else {
+            this.chordReadout.style.color = ''; // default color
+        }
         this.chordReadout.classList.remove('dim');
         this.chordReadout.classList.add('pulse');
         setTimeout(() => this.chordReadout && this.chordReadout.classList.remove('pulse'), 120);

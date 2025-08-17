@@ -10,7 +10,9 @@ export class AudioManager {
     // Chord analyser (high resolution FFT)
     this.chordAnalyser = this.ctx.createAnalyser();
     this.chordAnalyser.fftSize = 16384;
-    this.chordAnalyser.smoothingTimeConstant = 0.8;
+    this.chordAnalyser.smoothingTimeConstant = 0.0;
+    this.chordAnalyser.minDecibels = -100;
+    this.chordAnalyser.maxDecibels = -20;
 
     this.source = null;
     this.queue = [];
