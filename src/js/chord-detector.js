@@ -1,36 +1,57 @@
 // src/js/chord-detector.js
 export class ChordDetector {
   constructor(analyser, opts = {}) {
-    this.analyser = analyser; // dedicated chord analyser
+    this.analyser = analyser;
     this.sampleRate = opts.sampleRate || 44100;
     this.fftSize = analyser.fftSize || 16384;
 
     this.fftBins = new Float32Array(this.fftSize / 2);
     this.pitchClassEnergy = new Float32Array(12);
+    this.chromaEma = new Float32Array(12);
 
-    this.minFreq = opts.minFreq || 50;    // ignore sub-bass rumble
-    this.maxFreq = opts.maxFreq || 5000;  // chords are clearest below ~5kHz
-    // Increase the default hold and confidence so the UI is less "twitchy".
-    // Chords will only update a couple of times per second and require a
-    // reasonably strong template match before being reported.
-    this.holdMs  = opts.holdMs  || 500;   // ms to hold a chord before changing
-    this.minConfidence = opts.minConfidence || 0.4;
-    this.extRatio = opts.extRatio || 0.3; // relative energy for extensions
+    // Frequency range tuned for fundamentals + a bit of upper content
+    this.minFreq = opts.minFreq || 70;
+    this.maxFreq = opts.maxFreq || 2200;
 
-    // Create major/minor templates (Krumhansl-ish, normalized)
-    // Root=1.0, major third & fifth emphasized; likewise for minor.
-    this.majorTemplate = this._norm([1,0,0,0,1,0,0,1,0,0,0,0]); // R, 3, 5
-    this.minorTemplate = this._norm([1,0,0,1,0,0,0,1,0,0,0,0]); // R, b3, 5
+    // Stabilization
+    this.holdMsEnter = opts.holdMsEnter || 800;   // time before announcing a *new* chord
+    this.holdMsExit  = opts.holdMsExit  || 450;   // time before clearing on uncertainty
+    this.requiredStableFrames = opts.requiredStableFrames || 4;
 
+    // Confidence (hysteresis)
+    this.confEnter = opts.confEnter || 0.62;
+    this.confExit  = opts.confExit  || 0.48;
+
+    // Activity detection
+    this.harmonicThreshold = opts.harmonicThreshold || 0.28;
+    this.noiseFloorAlpha = opts.noiseFloorAlpha || 0.05;  // EMA for noise floor
+    this.noiseFloor = 0;
+
+    // Smoothing
+    this.chromaAlpha = opts.chromaAlpha || 0.35; // EMA smoothing
+
+    // Root biasing from bass region
+    this.enableBassBias = opts.enableBassBias ?? true;
+    this.bassMaxFreq = opts.bassMaxFreq || 220;  // Hz
+    this.bassBias = opts.bassBias || 0.12;       // add to template root bin
+
+    // Harmonic whitening (reduces 2f/3f dominance from single notes)
+    this.enableWhitening = opts.enableWhitening ?? true;
+
+    // Templates (weighted; normalized later)
+    this.templates = this._buildTemplates();
+
+    // State
     this.lastChord = null;
     this.lastChangeTime = 0;
-    this.onChord = () => {}; // hook set by UI
+    this.confidenceHistory = [];
+    this.maxHistoryLength = 10;
+    this.stableChordCount = 0;
+
+    this.onChord = () => {};
   }
 
-  setOnChord(callback) {
-    this.onChord = callback;
-  }
-
+  setOnChord(cb) { this.onChord = cb; }
   start() {
     const tick = () => { this.update(); requestAnimationFrame(tick); };
     requestAnimationFrame(tick);
@@ -38,116 +59,277 @@ export class ChordDetector {
 
   update() {
     if (!this.analyser) return;
+
     this.analyser.getFloatFrequencyData(this.fftBins);
     const chroma = this._computeChroma();
     if (!chroma) return;
 
-    // Find best (root, quality) by rotating templates
-    let bestScore = -Infinity, bestRoot = 0, bestQual = 'maj';
-    for (let root = 0; root < 12; root++) {
-      const majScore = this._dot(chroma, this._rotate(this.majorTemplate, root));
-      const minScore = this._dot(chroma, this._rotate(this.minorTemplate, root));
-      const score = Math.max(majScore, minScore);
-      const qual  = majScore >= minScore ? 'maj' : 'min';
-      if (score > bestScore) {
-        bestScore = score; bestRoot = root; bestQual = qual;
-      }
-    }
-
-    // Confidence: cosine similarity (chroma normalized already)
-    const normChroma = this._norm(chroma);
-    const bestTemplate = this._rotate(bestQual === 'maj' ? this.majorTemplate : this.minorTemplate, bestRoot);
-    const confidence = this._dot(normChroma, bestTemplate);
-
-    // Determine extensions (7ths, 9ths)
-    const triadMax = Math.max(
-      chroma[bestRoot],
-      chroma[(bestRoot + (bestQual === 'maj' ? 4 : 3)) % 12],
-      chroma[(bestRoot + 7) % 12]
-    );
-    const extThresh = triadMax * this.extRatio;
-    const hasDom7 = chroma[(bestRoot + 10) % 12] >= extThresh;
-    const hasMaj7 = chroma[(bestRoot + 11) % 12] >= extThresh;
-    const has9 = chroma[(bestRoot + 2) % 12] >= extThresh;
-
-    let quality = bestQual;
-    if (bestQual === 'maj') {
-      if (hasDom7) quality = has9 ? '9' : '7';
-      else if (hasMaj7) quality = has9 ? 'maj9' : 'maj7';
-      else if (has9) quality = 'add9';
-    } else {
-      if (hasDom7) quality = has9 ? 'min9' : 'min7';
-      else if (hasMaj7) quality = has9 ? 'minMaj9' : 'minMaj7';
-      else if (has9) quality = 'madd9';
-    }
-
-    const chordName = `${this._pcToName(bestRoot)} ${quality}`;
-    const now = performance.now();
-
-    // If confidence drops below the threshold for long enough, clear the
-    // displayed chord so the UI shows "—" instead of rapidly flickering
-    // between uncertain guesses.
-    if (confidence < this.minConfidence) {
-      if (this.lastChord !== null && (now - this.lastChangeTime) > this.holdMs) {
-        this.lastChord = null;
-        this.lastChangeTime = now;
-        this.onChord({ name: null, confidence });
-      }
+    // Adaptive noise floor & activity gate
+    const totalEnergy = chroma.reduce((s, v) => s + v, 0);
+    this.noiseFloor = (1 - this.noiseFloorAlpha) * this.noiseFloor + this.noiseFloorAlpha * totalEnergy;
+    const gate = Math.max(0.08, this.noiseFloor * 1.6);
+    if (totalEnergy < gate) {
+      this._handleSilence();
       return;
     }
 
-    if (!this.lastChord || (chordName !== this.lastChord && (now - this.lastChangeTime) > this.holdMs)) {
-      this.lastChord = chordName;
-      this.lastChangeTime = now;
-      this.onChord({ name: chordName, confidence });
+    // Need enough distinct pitch classes to be “chord-like”
+    const active = chroma.filter(v => v > totalEnergy * this.harmonicThreshold).length;
+    if (active < 2) {
+      this._handleSingleNote();
+      return;
     }
+
+    // Optional bass-root bias
+    let biasedChroma = chroma;
+    if (this.enableBassBias) {
+      const bassPc = this._lowestStrongPc();
+      if (bassPc !== null) {
+        biasedChroma = biasedChroma.slice();
+        biasedChroma[bassPc] += this.bassBias * Math.max(...biasedChroma);
+      }
+    }
+
+    const detection = this._findBestChord(biasedChroma);
+    if (!detection) { this._handleLowConfidence(); return; }
+
+    // Hysteresis thresholds
+    const enterOK = detection.confidence >= this.confEnter;
+    const exitOK  = detection.confidence >= this.confExit;
+
+    const now = performance.now();
+    const chordName = `${this._pcToName(detection.root)}${detection.quality}`;
+
+    if (chordName !== this.lastChord) {
+      if (enterOK) {
+        this.stableChordCount++;
+        if (this.stableChordCount >= this.requiredStableFrames &&
+            (now - this.lastChangeTime) > this.holdMsEnter) {
+          this._setCurrentChord(chordName, detection.confidence);
+        }
+      } else {
+        this.stableChordCount = Math.max(0, this.stableChordCount - 1);
+        // If we were holding something else for a while but new candidate is weak, keep old
+      }
+    } else {
+      // Same chord—maintain or clear with exit hysteresis + time
+      if (exitOK) {
+        this.stableChordCount = Math.min(this.stableChordCount + 1, this.requiredStableFrames);
+      } else if ((now - this.lastChangeTime) > this.holdMsExit) {
+        this._clearChord();
+      }
+    }
+  }
+
+  _findBestChord(chroma) {
+    let best = null;
+    let bestScore = -Infinity;
+
+    for (let root = 0; root < 12; root++) {
+      for (const t of this.templates) {
+        const rotated = this._rotate(t.vec, root);
+        const score = this._dot(chroma, rotated);
+        if (score > bestScore) {
+          bestScore = score;
+          const confidence = this._confidence(chroma, rotated);
+          best = { root, quality: t.suffix, confidence, score };
+        }
+      }
+    }
+
+    // Lightweight 7th/add detection layered on top of the chosen triad-like class
+    if (best && (best.quality === '' || best.quality === 'm' || best.quality === 'sus2' || best.quality === 'sus4')) {
+      best = this._checkForSeventhsAndAdds(chroma, best);
+    }
+    return best;
+  }
+
+  _checkForSeventhsAndAdds(chroma, det) {
+    const { root, quality } = det;
+    const third = (root + (quality === 'm' ? 3 : 4)) % 12;
+    const fifth = (root + 7) % 12;
+    const triadRef = Math.max(chroma[root], chroma[third], chroma[fifth]);
+
+    const b7 = chroma[(root + 10) % 12];
+    const M7 = chroma[(root + 11) % 12];
+    const add2 = chroma[(root + 2) % 12];
+    const thresh = triadRef * 0.45;
+
+    if (M7 > b7 && M7 > thresh) {
+      return { ...det, quality: quality === 'm' ? 'mMaj7' : 'Maj7' };
+    }
+    if (b7 > thresh) {
+      if (add2 > thresh * 0.9) return { ...det, quality: quality === 'm' ? 'm9' : '9' };
+      return { ...det, quality: quality === 'm' ? 'm7' : '7' };
+    }
+    if (add2 > thresh) return { ...det, quality: (quality === 'm' ? 'madd9' : 'add9') };
+
+    return det;
+  }
+
+  _confidence(chroma, template) {
+    // cosine sim – off-template penalty – sparsity boost
+    const nc = this._norm(chroma);
+    const nt = this._norm(template);
+    const sim = this._dot(nc, nt);
+
+    let penalty = 0;
+    for (let i = 0; i < 12; i++) {
+      if (nt[i] < 0.08 && nc[i] > 0.18) penalty += nc[i] * 0.35;
+    }
+    const sparsity = 1 - (nc.filter(v => v > 0.12).length / 12); // fewer actives → slightly higher confidence
+    return Math.max(0, sim - penalty + 0.06 * sparsity);
   }
 
   _computeChroma() {
+    // reset & accumulate
     this.pitchClassEnergy.fill(0);
-    const binHz = this.sampleRate / (2 * this.fftBins.length); // Hz per bin
-    for (let i = 0; i < this.fftBins.length; i++) {
-      const mag = Math.pow(10, this.fftBins[i] / 20); // dB -> linear
-      if (mag <= 0) continue;
-      const freq = i * binHz;
-      if (freq < this.minFreq || freq > this.maxFreq) continue;
+    const len = this.fftBins.length;
+    const binHz = this.sampleRate / (2 * len);
 
-      // freq -> MIDI -> pitch class
-      const midi = 69 + 12 * Math.log2(freq / 440);
+    for (let i = 1; i < len; i++) {
+      // convert dB → linear magnitude
+      let mag = Math.pow(10, this.fftBins[i] / 20);
+      if (mag <= 0) continue;
+
+      const f = i * binHz;
+      if (f < this.minFreq || f > this.maxFreq) continue;
+
+      // simple harmonic whitening: down-weight 2f and 3f regions
+      if (this.enableWhitening) {
+        const i2 = Math.round(i * 0.5); // ~fundamental index if current is 2f
+        const i3 = Math.round(i / 3);   // ~fundamental index if current is 3f
+        if (i2 > 0 && this.fftBins[i2] > this.fftBins[i] + 6) mag *= 0.65;
+        if (i3 > 0 && this.fftBins[i3] > this.fftBins[i] + 6) mag *= 0.75;
+      }
+
+      // map to nearest pitch class
+      const midi = 69 + 12 * Math.log2(f / 440);
       const pc = ((Math.round(midi) % 12) + 12) % 12;
-      this.pitchClassEnergy[pc] += mag;
+
+      // weight lows more (fundamentals)
+      const freqWeight = Math.exp(-f / 1100);
+      this.pitchClassEnergy[pc] += mag * freqWeight;
     }
-    // normalize chroma
-    return this._norm(this.pitchClassEnergy);
+
+    // L2 → robust L1-ish normalization with small floor
+    const maxVal = Math.max(...this.pitchClassEnergy);
+    if (maxVal === 0) return null;
+
+    const normed = new Float32Array(12);
+    let sum = 0;
+    for (let i = 0; i < 12; i++) {
+      normed[i] = this.pitchClassEnergy[i] / (maxVal + 1e-8);
+      sum += normed[i];
+    }
+    for (let i = 0; i < 12; i++) normed[i] = normed[i] / (sum + 1e-8);
+
+    // EMA smoothing across frames
+    for (let i = 0; i < 12; i++) {
+      this.chromaEma[i] = (1 - this.chromaAlpha) * this.chromaEma[i] + this.chromaAlpha * normed[i];
+    }
+
+    // soft threshold relative to EMA peak
+    const peak = Math.max(...this.chromaEma);
+    const thr = peak * 0.10;
+    const out = new Float32Array(12);
+    for (let i = 0; i < 12; i++) out[i] = this.chromaEma[i] < thr ? 0 : this.chromaEma[i];
+
+    return out;
+  }
+
+  _lowestStrongPc() {
+    // scan bins up to bassMaxFreq, find strongest pc
+    const len = this.fftBins.length;
+    const binHz = this.sampleRate / (2 * len);
+    const maxBin = Math.min(len - 1, Math.floor(this.bassMaxFreq / binHz));
+    const accum = new Float32Array(12);
+
+    for (let i = 1; i <= maxBin; i++) {
+      const mag = Math.pow(10, this.fftBins[i] / 20);
+      if (mag <= 0) continue;
+      const f = i * binHz;
+      const midi = 69 + 12 * Math.log2(f / 440);
+      const pc = ((Math.round(midi) % 12) + 12) % 12;
+      accum[pc] += mag;
+    }
+    const peak = Math.max(...accum);
+    if (peak <= 0) return null;
+    return accum.indexOf(peak);
+  }
+
+  _handleSilence() {
+    const now = performance.now();
+    if (this.lastChord && (now - this.lastChangeTime) > this.holdMsExit * 2) this._clearChord();
+  }
+  _handleSingleNote() {
+    this.stableChordCount = Math.max(0, this.stableChordCount - 1);
+  }
+  _handleLowConfidence() {
+    this.stableChordCount = Math.max(0, this.stableChordCount - 1);
+    const now = performance.now();
+    if ((now - this.lastChangeTime) > this.holdMsExit) this._clearChord();
+  }
+
+  _setCurrentChord(name, confidence) {
+    this.lastChord = name;
+    this.lastChangeTime = performance.now();
+    this.stableChordCount = this.requiredStableFrames;
+    this.onChord({ name, confidence });
+  }
+  _clearChord() {
+    if (this.lastChord !== null) {
+      this.lastChord = null;
+      this.lastChangeTime = performance.now();
+      this.confidenceHistory = [];
+      this.stableChordCount = 0;
+      this.onChord({ name: null, confidence: 0 });
+    }
   }
 
   _pcToName(pc) {
-    // Prefer flats for black keys to feel more guitar-friendly
-    const names = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
-    const idx = ((pc % 12) + 12) % 12;
-    return names[idx];
+    return ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'][((pc % 12)+12)%12];
   }
-
   _rotate(arr, n) {
     const out = new Float32Array(arr.length);
     for (let i = 0; i < arr.length; i++) out[i] = arr[(i - n + arr.length) % arr.length];
     return out;
   }
-
   _dot(a, b) {
-    let s = 0;
-    for (let i = 0; i < a.length; i++) s += a[i] * b[i];
-    return s;
+    let s = 0; for (let i = 0; i < 12; i++) s += a[i] * b[i]; return s;
+  }
+  _norm(arr) {
+    let sum = 0; for (let i = 0; i < arr.length; i++) sum += arr[i] * arr[i];
+    if (sum === 0) return new Float32Array(arr.length);
+    const mag = Math.sqrt(sum);
+    const out = new Float32Array(arr.length);
+    for (let i = 0; i < arr.length; i++) out[i] = arr[i] / mag;
+    return out;
   }
 
-  _norm(a) {
-    let sum = 0;
-    for (let i = 0; i < a.length; i++) sum += a[i] * a[i];
-    if (sum === 0) return new Float32Array(a.length);
-    const inv = 1 / Math.sqrt(sum);
-    const out = new Float32Array(a.length);
-    for (let i = 0; i < a.length; i++) out[i] = a[i] * inv;
-    return out;
+  _buildTemplates() {
+    const N = (v) => this._norm(v);
+
+    // triads
+    const maj  = N([1,0,0,0,0.75,0,0,0.9,0,0,0,0]);  // R,3,5
+    const min  = N([1,0,0,0.75,0,0,0,0.9,0,0,0,0]);  // R,b3,5
+    const dim  = N([1,0,0,0.75,0,0,0.65,0,0,0,0,0]); // R,b3,b5
+    const aug  = N([1,0,0,0,0.75,0,0,0,0.75,0,0,0]); // R,3,#5
+
+    // guitar-friendly shapes
+    const pow5 = N([1,0,0,0,0,0,0,0.9,0,0,0,0]);     // R,5 (no 3rd)
+    const sus2 = N([1,0.85,0,0,0,0,0,0.9,0,0,0,0]);  // R,2,5
+    const sus4 = N([1,0,0,0,0,0.85,0,0.9,0,0,0,0]);  // R,4,5
+
+    return [
+      { vec: maj,  suffix: ''   },
+      { vec: min,  suffix: 'm'  },
+      { vec: dim,  suffix: 'dim'},
+      { vec: aug,  suffix: 'aug'},
+      { vec: pow5, suffix: '5'  },
+      { vec: sus2, suffix: 'sus2' },
+      { vec: sus4, suffix: 'sus4' },
+    ];
   }
 }
 
