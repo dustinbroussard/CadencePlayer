@@ -21,8 +21,11 @@ describe('ChordDetector', () => {
 
     const detector = new ChordDetector(analyser, {
       sampleRate,
-      minConfidence: 0,
-      holdMs: 0
+      confEnter: 0,
+      confExit: 0,
+      holdMsEnter: 0,
+      holdMsExit: 0,
+      requiredStableFrames: 1
     });
 
     let detected = null;
@@ -33,7 +36,7 @@ describe('ChordDetector', () => {
     detector.update();
 
     expect(detected).not.toBeNull();
-    expect(detected.name).toBe('C maj');
+    expect(detected.name).toBe('C');
   });
 
   it('pcToName wraps out-of-range values', () => {
@@ -51,8 +54,11 @@ describe('ChordDetector', () => {
 
     const detector = new ChordDetector(analyser, {
       sampleRate: 44100,
-      minConfidence: 0.9,
-      holdMs: 0
+      confEnter: 0.9,
+      confExit: 0.9,
+      holdMsEnter: 0,
+      holdMsExit: 0,
+      requiredStableFrames: 1
     });
 
     let called = false;

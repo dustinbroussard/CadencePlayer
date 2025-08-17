@@ -8,11 +8,13 @@ class Renderer {
     this.visualizer = new Visualizer('visualizer', this.audioManager.getAnalyser());
     this.chordDetector = new ChordDetector(this.audioManager.getChordAnalyser(), {
       sampleRate: this.audioManager.ctx.sampleRate,
-      // Use a fairly conservative confidence and hold time so the readout
-      // only changes a couple of times per second and stays on chords the
-      // detector feels confident about.
-      minConfidence: 0.4,
-      holdMs: 500
+      // Configure chord detector to announce chords a little quicker and at a
+      // slightly lower confidence than the defaults.
+      confEnter: 0.4,
+      confExit: 0.32,
+      holdMsEnter: 500,
+      holdMsExit: 250,
+      requiredStableFrames: 2
     });
     
     // UI Elements
@@ -55,7 +57,8 @@ class Renderer {
       } else {
         const conf = Math.round(confidence * 100);
         this.chordReadout.textContent = `${name}  ·  ${conf}%`;
-        if (conf >= 62) {  // Match confEnter threshold of 0.62
+        const greenThresh = Math.round(this.chordDetector.confEnter * 100);
+        if (conf >= greenThresh) {
             this.chordReadout.style.color = '#4ade80'; // green-400
         } else {
             this.chordReadout.style.color = ''; // default color
