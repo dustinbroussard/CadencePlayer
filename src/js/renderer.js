@@ -7,7 +7,12 @@ class Renderer {
     this.audioManager = new AudioManager();
     this.visualizer = new Visualizer('visualizer', this.audioManager.getAnalyser());
     this.chordDetector = new ChordDetector(this.audioManager.getChordAnalyser(), {
-      sampleRate: this.audioManager.ctx.sampleRate
+      sampleRate: this.audioManager.ctx.sampleRate,
+      // Use a fairly conservative confidence and hold time so the readout
+      // only changes a couple of times per second and stays on chords the
+      // detector feels confident about.
+      minConfidence: 0.4,
+      holdMs: 500
     });
     
     // UI Elements
@@ -41,9 +46,16 @@ class Renderer {
 
     // Start chord detector loop
     this.chordDetector.setOnChord(({ name, confidence }) => {
-      if (this.chordReadout) {
+      if (!this.chordReadout) return;
+
+      if (!name) {
+        this.chordReadout.textContent = '—';
+        this.chordReadout.classList.add('dim');
+        this.chordReadout.classList.remove('pulse');
+      } else {
         const conf = Math.round(confidence * 100);
         this.chordReadout.textContent = `${name}  ·  ${conf}%`;
+        this.chordReadout.classList.remove('dim');
         this.chordReadout.classList.add('pulse');
         setTimeout(() => this.chordReadout && this.chordReadout.classList.remove('pulse'), 120);
       }

@@ -42,4 +42,22 @@ describe('ChordDetector', () => {
     expect(detector._pcToName(12)).toBe('C');
     expect(detector._pcToName(-1)).toBe('B');
   });
+
+  it('ignores chords below the confidence threshold', () => {
+    const analyser = {
+      fftSize: 2048,
+      getFloatFrequencyData: (arr) => arr.fill(-100) // essentially silence
+    };
+
+    const detector = new ChordDetector(analyser, {
+      sampleRate: 44100,
+      minConfidence: 0.9,
+      holdMs: 0
+    });
+
+    let called = false;
+    detector.setOnChord(() => { called = true; });
+    detector.update();
+    expect(called).toBe(false);
+  });
 });

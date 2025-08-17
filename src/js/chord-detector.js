@@ -10,8 +10,11 @@ export class ChordDetector {
 
     this.minFreq = opts.minFreq || 50;    // ignore sub-bass rumble
     this.maxFreq = opts.maxFreq || 5000;  // chords are clearest below ~5kHz
-    this.holdMs  = opts.holdMs  || 120;   // display hold to reduce flicker
-    this.minConfidence = opts.minConfidence || 0.22;
+    // Increase the default hold and confidence so the UI is less "twitchy".
+    // Chords will only update a couple of times per second and require a
+    // reasonably strong template match before being reported.
+    this.holdMs  = opts.holdMs  || 500;   // ms to hold a chord before changing
+    this.minConfidence = opts.minConfidence || 0.4;
     this.extRatio = opts.extRatio || 0.3; // relative energy for extensions
 
     // Create major/minor templates (Krumhansl-ish, normalized)
@@ -81,12 +84,22 @@ export class ChordDetector {
     const chordName = `${this._pcToName(bestRoot)} ${quality}`;
     const now = performance.now();
 
-    if (!this.lastChord || (chordName !== this.lastChord && (now - this.lastChangeTime) > this.holdMs)) {
-      if (confidence >= this.minConfidence) {
-        this.lastChord = chordName;
+    // If confidence drops below the threshold for long enough, clear the
+    // displayed chord so the UI shows "—" instead of rapidly flickering
+    // between uncertain guesses.
+    if (confidence < this.minConfidence) {
+      if (this.lastChord !== null && (now - this.lastChangeTime) > this.holdMs) {
+        this.lastChord = null;
         this.lastChangeTime = now;
-        this.onChord({ name: chordName, confidence });
+        this.onChord({ name: null, confidence });
       }
+      return;
+    }
+
+    if (!this.lastChord || (chordName !== this.lastChord && (now - this.lastChangeTime) > this.holdMs)) {
+      this.lastChord = chordName;
+      this.lastChangeTime = now;
+      this.onChord({ name: chordName, confidence });
     }
   }
 
