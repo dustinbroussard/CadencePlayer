@@ -54,6 +54,7 @@ class Renderer {
         this.chordReadout.textContent = '—';
         this.chordReadout.classList.add('dim');
         this.chordReadout.classList.remove('pulse');
+        this.chordReadout.style.color = '';
       } else {
         const conf = Math.round(confidence * 100);
         this.chordReadout.textContent = `${name}  ·  ${conf}%`;

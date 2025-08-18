@@ -2,38 +2,38 @@
 export class ChordDetector {
   constructor(analyser, opts = {}) {
     this.analyser = analyser;
-    this.sampleRate = opts.sampleRate || 44100;
-    this.fftSize = analyser.fftSize || 16384;
+    this.sampleRate = opts.sampleRate ?? 44100;
+    this.fftSize = analyser.fftSize ?? 16384;
 
     this.fftBins = new Float32Array(this.fftSize / 2);
     this.pitchClassEnergy = new Float32Array(12);
     this.chromaEma = new Float32Array(12);
 
     // Frequency range tuned for fundamentals + a bit of upper content
-    this.minFreq = opts.minFreq || 70;
-    this.maxFreq = opts.maxFreq || 2200;
+    this.minFreq = opts.minFreq ?? 70;
+    this.maxFreq = opts.maxFreq ?? 2200;
 
     // Stabilization
-    this.holdMsEnter = opts.holdMsEnter || 800;   // time before announcing a *new* chord
-    this.holdMsExit  = opts.holdMsExit  || 450;   // time before clearing on uncertainty
-    this.requiredStableFrames = opts.requiredStableFrames || 4;
+    this.holdMsEnter = opts.holdMsEnter ?? 800;   // time before announcing a *new* chord
+    this.holdMsExit  = opts.holdMsExit  ?? 450;   // time before clearing on uncertainty
+    this.requiredStableFrames = opts.requiredStableFrames ?? 4;
 
     // Confidence (hysteresis)
-    this.confEnter = opts.confEnter || 0.62;
-    this.confExit  = opts.confExit  || 0.48;
+    this.confEnter = opts.confEnter ?? 0.62;
+    this.confExit  = opts.confExit  ?? 0.48;
 
     // Activity detection
-    this.harmonicThreshold = opts.harmonicThreshold || 0.28;
-    this.noiseFloorAlpha = opts.noiseFloorAlpha || 0.05;  // EMA for noise floor
+    this.harmonicThreshold = opts.harmonicThreshold ?? 0.28;
+    this.noiseFloorAlpha = opts.noiseFloorAlpha ?? 0.05;  // EMA for noise floor
     this.noiseFloor = 0;
 
     // Smoothing
-    this.chromaAlpha = opts.chromaAlpha || 0.35; // EMA smoothing
+    this.chromaAlpha = opts.chromaAlpha ?? 0.35; // EMA smoothing
 
     // Root biasing from bass region
     this.enableBassBias = opts.enableBassBias ?? true;
-    this.bassMaxFreq = opts.bassMaxFreq || 220;  // Hz
-    this.bassBias = opts.bassBias || 0.12;       // add to template root bin
+    this.bassMaxFreq = opts.bassMaxFreq ?? 220;  // Hz
+    this.bassBias = opts.bassBias ?? 0.12;       // add to template root bin
 
     // Harmonic whitening (reduces 2f/3f dominance from single notes)
     this.enableWhitening = opts.enableWhitening ?? true;
