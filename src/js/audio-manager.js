@@ -115,12 +115,13 @@ export class AudioManager {
       // Get duration before adding to queue
       await new Promise(resolve => {
         audio.onloadedmetadata = () => {
-          this.queue.push({ 
-            path: file.path, 
-            name: file.name, 
-            url: url, 
+          this.queue.push({
+            path: file.path,
+            name: file.name,
+            url: url,
             audio: audio,
-            duration: audio.duration
+            duration: audio.duration,
+            source: null
           });
           resolve();
         };
@@ -133,13 +134,15 @@ export class AudioManager {
   }
 
   clearQueue() {
+    // Disconnect any existing track sources
+    this.queue.forEach(t => t.source && t.source.disconnect());
     this.queue = [];
     this.currentIndex = -1;
     this.isPlaying = false;
     if (this.source) {
-      this.source.disconnect();
       this.source.mediaElement.pause();
       this.source.mediaElement.currentTime = 0;
+      this.source = null;
     }
     this.emit('track-loaded', null);
     this.emit('queue-updated');
@@ -162,19 +165,20 @@ export class AudioManager {
   playTrack(index) {
     if (this.source) {
       this.source.mediaElement.pause();
-      this.source.disconnect();
     }
-    
+
     this.currentIndex = index;
     const track = this.queue[this.currentIndex];
     if (!track) return;
-    
-    // Create new source from existing audio element
-    this.source = this.ctx.createMediaElementSource(track.audio);
 
-    // Route audio into master gain (which fans out to EQ + analysers)
-    this.source.connect(this.masterGain);
-    
+    // Lazily create and wire source the first time this track plays
+    if (!track.source) {
+      track.source = this.ctx.createMediaElementSource(track.audio);
+      track.source.connect(this.masterGain);
+    }
+
+    this.source = track.source;
+
     track.audio.currentTime = 0;
     track.audio.play();
     this.isPlaying = true;
