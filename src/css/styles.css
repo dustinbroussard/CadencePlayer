@@ -15,6 +15,11 @@
   --border-color: rgba(255, 255, 255, 0.1);
   --playing-bg: rgba(76, 175, 80, 0.1);
   --playing-border: rgba(76, 175, 80, 0.5);
+  --radius: 1rem;
+  --radius-sm: 0.5rem;
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.3);
+  --transition: 0.3s ease-in-out;
 }
 
 * {
@@ -31,7 +36,7 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition: all 0.3s ease;
+  transition: background var(--transition), color var(--transition);
 }
 
 body.dark-mode {
@@ -71,6 +76,7 @@ body.drag-over .app-container {
   background: var(--header-bg);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
   position: fixed;
   top: 0;
   left: 0;
@@ -99,13 +105,20 @@ body.drag-over .app-container {
   width: 40px;
   height: 34px;
   cursor: pointer;
-  transition: background 0.2s;
+  border-radius: var(--radius-sm);
+  transition: background var(--transition), opacity var(--transition);
   opacity: 0.7;
 }
 
 .titlebar-btn:hover {
   background: rgba(255, 255, 255, 0.1);
   opacity: 1;
+  box-shadow: var(--shadow-sm);
+}
+
+.titlebar-btn:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
 }
 
 .titlebar-btn.close-btn:hover {
@@ -133,25 +146,30 @@ body.drag-over .app-container {
   min-height: 0;
 }
 
+
 .sidebar {
   width: 300px;
   background: var(--sidebar-bg);
   backdrop-filter: blur(10px);
-  border-radius: 12px;
+  border-radius: var(--radius);
   border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
   padding: 20px;
   display: flex;
   flex-direction: column;
   gap: 20px;
   overflow: hidden;
+  transition: box-shadow var(--transition);
 }
+
 
 .main-content {
   flex-grow: 1;
   background: var(--sidebar-bg);
   backdrop-filter: blur(10px);
-  border-radius: 12px;
+  border-radius: var(--radius);
   border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -159,16 +177,19 @@ body.drag-over .app-container {
   align-items: center;
 }
 
+
 .player-bar-container {
   background: var(--sidebar-bg);
   backdrop-filter: blur(10px);
-  border-radius: 12px;
+  border-radius: var(--radius);
   border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
   padding: 15px 30px;
   display: flex;
   justify-content: space-between;
   align-items: center;
   height: 90px;
+  transition: box-shadow var(--transition);
 }
 
 /* --------------------------------------------------------------------------------
@@ -193,32 +214,37 @@ body.drag-over .app-container {
 
 .queue-list::-webkit-scrollbar-thumb {
   background-color: rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
+
 
 .queue-item {
   padding: 10px 15px;
   margin-bottom: 8px;
   background: rgba(255, 255, 255, 0.05);
-  border-radius: 8px;
+  border-radius: var(--radius);
   cursor: pointer;
-  transition: transform 0.2s, background 0.2s;
+  transition: transform var(--transition), background var(--transition), box-shadow var(--transition);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   position: relative;
   border: 1px solid transparent;
+  box-shadow: var(--shadow-sm);
 }
+
 
 .queue-item:hover {
   background: rgba(255, 255, 255, 0.1);
   transform: translateX(5px);
+  box-shadow: var(--shadow-md);
 }
+
 
 .queue-item.playing {
   background: var(--playing-bg);
   border-color: var(--playing-border);
-  box-shadow: 0 0 15px var(--playing-border);
+  box-shadow: var(--shadow-md), 0 0 15px var(--playing-border);
   position: relative;
 }
 
@@ -284,10 +310,12 @@ body.drag-over .app-container {
   letter-spacing: 0.4px;
   display: inline-block;
   padding: 4px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: rgba(255,255,255,0.08);
   border: 1px solid var(--border-color);
   color: var(--text-color);
+  box-shadow: var(--shadow-sm);
+  transition: background var(--transition), box-shadow var(--transition);
 }
 .chord-readout.pulse { box-shadow: 0 0 12px var(--playing-border); }
 .chord-readout.dim { opacity: 0.45; }
@@ -305,6 +333,7 @@ body.drag-over .app-container {
   gap: 15px;
 }
 
+
 .player-control-btn {
   background: var(--btn-bg);
   border: none;
@@ -316,24 +345,31 @@ body.drag-over .app-container {
   display: flex;
   justify-content: center;
   align-items: center;
-  transition: background 0.2s, transform 0.2s;
+  box-shadow: var(--shadow-sm);
+  transition: background var(--transition), transform var(--transition), box-shadow var(--transition);
 }
+
 
 .player-control-btn:hover {
   background: var(--btn-hover-bg);
   transform: scale(1.05);
+  box-shadow: var(--shadow-md);
 }
+
 
 .player-control-btn.main-btn {
   width: 50px;
   height: 50px;
   background: var(--accent-color);
   color: white;
+  box-shadow: var(--shadow-sm);
 }
+
 
 .player-control-btn.main-btn:hover {
   background: var(--accent-color);
   transform: scale(1.1);
+  box-shadow: var(--shadow-md);
 }
 
 .player-control-btn.toggle-btn.inactive {
@@ -356,10 +392,10 @@ body.drag-over .app-container {
   appearance: none;
   height: 5px;
   background: rgba(255, 255, 255, 0.2);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   outline: none;
-  transition: background 0.2s;
+  transition: background var(--transition);
 }
 
 .progress-bar::-webkit-slider-thumb {
@@ -370,6 +406,8 @@ body.drag-over .app-container {
   background: var(--accent-color);
   border-radius: 50%;
   cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition), transform var(--transition);
 }
 
 .progress-bar::-moz-range-thumb {
@@ -378,6 +416,8 @@ body.drag-over .app-container {
   background: var(--accent-color);
   border-radius: 50%;
   cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition), transform var(--transition);
 }
 
 .volume-and-eq {
@@ -401,8 +441,9 @@ body.drag-over .app-container {
   appearance: none;
   height: 5px;
   background: rgba(255, 255, 255, 0.2);
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
+  transition: background var(--transition);
 }
 
 .volume-slider::-webkit-slider-thumb {
@@ -413,6 +454,8 @@ body.drag-over .app-container {
   background: var(--text-color);
   border-radius: 50%;
   cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition), transform var(--transition);
 }
 
 .volume-slider::-moz-range-thumb {
@@ -421,6 +464,8 @@ body.drag-over .app-container {
   background: var(--text-color);
   border-radius: 50%;
   cursor: pointer;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition), transform var(--transition);
 }
 
 .eq-controls-container {
@@ -437,14 +482,15 @@ body.drag-over .app-container {
   background: var(--sidebar-bg);
   backdrop-filter: blur(10px);
   padding: 15px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-md);
   z-index: 10;
-  transition: transform 0.3s ease-out, opacity 0.3s ease-out;
+  transition: transform var(--transition), opacity var(--transition);
 }
 
 .eq-controls.hidden {
-  transform: translateY(20px);
+  transform: translateY(20px) scale(0.95);
   opacity: 0;
   pointer-events: none;
 }
@@ -460,10 +506,11 @@ body.drag-over .app-container {
   width: 8px;
   height: 100px;
   background: rgba(255, 255, 255, 0.2);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   writing-mode: vertical-lr;
   direction: rtl;
+  transition: background var(--transition);
 }
 
 .eq-slider::-webkit-slider-thumb {
@@ -474,6 +521,8 @@ body.drag-over .app-container {
   border-radius: 50%;
   border: none;
   margin-left: -4px;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition), transform var(--transition);
 }
 
 .freq-label {
@@ -492,6 +541,7 @@ body.drag-over .app-container {
     'opsz' 24
 }
 
+
 .control-btn {
   display: flex;
   align-items: center;
@@ -499,15 +549,50 @@ body.drag-over .app-container {
   padding: 10px 15px;
   background: var(--btn-bg);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--radius);
   color: var(--text-color);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.2s, transform 0.2s;
+  box-shadow: var(--shadow-sm);
+  transition: background var(--transition), transform var(--transition), box-shadow var(--transition);
 }
+
 
 .control-btn:hover {
   background: var(--btn-hover-bg);
   transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.control-btn:focus-visible,
+.player-control-btn:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+  .top-section {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+  }
+
+  .player-bar-container {
+    flex-direction: column;
+    height: auto;
+    gap: 15px;
+  }
+
+  .track-info,
+  .player-controls,
+  .volume-and-eq {
+    flex-basis: 100%;
+  }
+
+  .volume-and-eq {
+    justify-content: center;
+  }
 }
