@@ -76,6 +76,44 @@ describe('ChordDetector', () => {
     expect(detected.name).toBe('C6');
   });
 
+  it('detects a Cm6 chord', () => {
+    const fftSize = 16384;
+    const binsLength = fftSize / 2;
+    const fakeBins = new Float32Array(binsLength).fill(-Infinity);
+
+    const sampleRate = 44100;
+    const binHz = sampleRate / (2 * binsLength);
+    const freqToIndex = (f) => Math.round(f / binHz);
+    // C, Eb, G, A
+    [261.63, 311.13, 392.0, 440.0].forEach((freq) => {
+      fakeBins[freqToIndex(freq)] = 0;
+    });
+
+    const analyser = {
+      fftSize,
+      getFloatFrequencyData: (arr) => arr.set(fakeBins)
+    };
+
+    const detector = new ChordDetector(analyser, {
+      sampleRate,
+      confEnter: 0,
+      confExit: 0,
+      holdMsEnter: 0,
+      holdMsExit: 0,
+      requiredStableFrames: 1
+    });
+
+    let detected = null;
+    detector.setOnChord((chord) => {
+      detected = chord;
+    });
+
+    detector.update();
+
+    expect(detected).not.toBeNull();
+    expect(detected.name).toBe('Cm6');
+  });
+
   it('pcToName wraps out-of-range values', () => {
     const analyser = { fftSize: 2048, getFloatFrequencyData: () => {} };
     const detector = new ChordDetector(analyser);
