@@ -14,17 +14,17 @@ export class ChordDetector {
     this.maxFreq = opts.maxFreq ?? 2200;
 
     // Stabilization
-    this.holdMsEnter = opts.holdMsEnter ?? 800;   // time before announcing a *new* chord
-    this.holdMsExit  = opts.holdMsExit  ?? 450;   // time before clearing on uncertainty
-    this.requiredStableFrames = opts.requiredStableFrames ?? 4;
+    this.holdMsEnter = opts.holdMsEnter ?? 400;   // announce new chords faster
+    this.holdMsExit  = opts.holdMsExit  ?? 250;   // clear stale chords sooner
+    this.requiredStableFrames = opts.requiredStableFrames ?? 2;
 
     // Confidence (hysteresis)
-    this.confEnter = opts.confEnter ?? 0.62;
-    this.confExit  = opts.confExit  ?? 0.48;
+    this.confEnter = opts.confEnter ?? 0.4;
+    this.confExit  = opts.confExit  ?? 0.32;
 
     // Activity detection
-    this.harmonicThreshold = opts.harmonicThreshold ?? 0.28;
-    this.noiseFloorAlpha = opts.noiseFloorAlpha ?? 0.05;  // EMA for noise floor
+    this.harmonicThreshold = opts.harmonicThreshold ?? 0.2;
+    this.noiseFloorAlpha = opts.noiseFloorAlpha ?? 0.08;  // EMA for noise floor
     this.noiseFloor = 0;
 
     // Smoothing
@@ -67,7 +67,7 @@ export class ChordDetector {
     // Adaptive noise floor & activity gate
     const totalEnergy = chroma.reduce((s, v) => s + v, 0);
     this.noiseFloor = (1 - this.noiseFloorAlpha) * this.noiseFloor + this.noiseFloorAlpha * totalEnergy;
-    const gate = Math.max(0.08, this.noiseFloor * 1.6);
+    const gate = Math.max(0.04, this.noiseFloor * 1.3);
     if (totalEnergy < gate) {
       this._handleSilence();
       return;
@@ -153,6 +153,7 @@ export class ChordDetector {
     const b7 = chroma[(root + 10) % 12];
     const M7 = chroma[(root + 11) % 12];
     const add2 = chroma[(root + 2) % 12];
+    const sixth = chroma[(root + 9) % 12];
     const thresh = triadRef * 0.45;
 
     if (M7 > b7 && M7 > thresh) {
@@ -161,6 +162,10 @@ export class ChordDetector {
     if (b7 > thresh) {
       if (add2 > thresh * 0.9) return { ...det, quality: quality === 'm' ? 'm9' : '9' };
       return { ...det, quality: quality === 'm' ? 'm7' : '7' };
+    }
+    if (sixth > thresh) {
+      if (add2 > thresh * 0.9) return { ...det, quality: quality === 'm' ? 'm6/9' : '6/9' };
+      return { ...det, quality: quality === 'm' ? 'm6' : '6' };
     }
     if (add2 > thresh) return { ...det, quality: (quality === 'm' ? 'madd9' : 'add9') };
 

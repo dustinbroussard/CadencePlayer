@@ -1,6 +1,6 @@
 # CadencePlayer
 
 CadencePlayer is an Electron-based music player with a built in visualizer and
-real-time chord recognition. The chord display has been tuned to show only
-confident matches, dimming the readout when the detector is unsure so chords no
-longer flicker rapidly.
+real-time chord recognition. The detector now locks on to chords more quickly
+and can recognize common sixth and 6/9 voicings. The chord display still dims
+when confidence is low to avoid distracting flicker.
