@@ -315,7 +315,8 @@ body.drag-over .app-container {
   border: 1px solid var(--border-color);
   color: var(--text-color);
   box-shadow: var(--shadow-sm);
-  transition: background var(--transition), box-shadow var(--transition);
+  transition: background var(--transition), box-shadow var(--transition),
+              border-color var(--transition), color var(--transition);
 }
 .chord-readout.pulse { box-shadow: 0 0 12px var(--playing-border); }
 .chord-readout.dim { opacity: 0.45; }

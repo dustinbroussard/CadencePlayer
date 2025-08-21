@@ -54,22 +54,37 @@ class Renderer {
         this.chordReadout.textContent = '—';
         this.chordReadout.classList.add('dim');
         this.chordReadout.classList.remove('pulse');
-        this.chordReadout.style.color = '';
+        this.chordReadout.style.removeProperty('color');
+        this.chordReadout.style.removeProperty('background');
+        this.chordReadout.style.removeProperty('border-color');
       } else {
         const conf = Math.round(confidence * 100);
         this.chordReadout.textContent = `${name}  ·  ${conf}%`;
+
+        const { fg, bg } = this.getChordColors(name);
         const greenThresh = Math.round(this.chordDetector.confEnter * 100);
-        if (conf >= greenThresh) {
-            this.chordReadout.style.color = '#4ade80'; // green-400
-        } else {
-            this.chordReadout.style.color = ''; // default color
-        }
+        this.chordReadout.style.color = conf >= greenThresh ? fg : '';
+        this.chordReadout.style.background = bg;
+        this.chordReadout.style.borderColor = fg;
+
         this.chordReadout.classList.remove('dim');
         this.chordReadout.classList.add('pulse');
         setTimeout(() => this.chordReadout && this.chordReadout.classList.remove('pulse'), 120);
       }
     });
     this.chordDetector.start();
+  }
+
+  getChordColors(name) {
+    const quality = name.replace(/^[A-G]#?/, '');
+    if (quality.includes('dim')) return { fg: '#f87171', bg: 'rgba(248,113,113,0.15)' };
+    if (quality.includes('aug')) return { fg: '#fbbf24', bg: 'rgba(251,191,36,0.15)' };
+    if (quality.startsWith('m') && !quality.startsWith('maj')) return { fg: '#60a5fa', bg: 'rgba(96,165,250,0.15)' };
+    if (quality.includes('sus')) return { fg: '#c084fc', bg: 'rgba(192,132,252,0.15)' };
+    if (quality.includes('6')) return { fg: '#34d399', bg: 'rgba(52,211,153,0.15)' };
+    if (quality.includes('7') || quality.includes('9')) return { fg: '#fbbf24', bg: 'rgba(251,191,36,0.15)' };
+    if (quality.includes('5')) return { fg: '#a1a1aa', bg: 'rgba(161,161,170,0.15)' };
+    return { fg: '#4ade80', bg: 'rgba(74,222,128,0.15)' }; // major/default
   }
 
   initEventListeners() {

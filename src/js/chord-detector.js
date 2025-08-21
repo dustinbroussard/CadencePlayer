@@ -137,8 +137,10 @@ export class ChordDetector {
       }
     }
 
-    // Lightweight 7th/add detection layered on top of the chosen triad-like class
-    if (best && (best.quality === '' || best.quality === 'm' || best.quality === 'sus2' || best.quality === 'sus4')) {
+    // Lightweight 7th/add detection layered on top of common chord classes
+    // Now also runs for detected 6th chords so we can upgrade to 6/9 etc.
+    const checkQualities = ['', 'm', 'sus2', 'sus4', '6', 'm6'];
+    if (best && checkQualities.includes(best.quality)) {
       best = this._checkForSeventhsAndAdds(chroma, best);
     }
     return best;
@@ -146,7 +148,8 @@ export class ChordDetector {
 
   _checkForSeventhsAndAdds(chroma, det) {
     const { root, quality } = det;
-    const third = (root + (quality === 'm' ? 3 : 4)) % 12;
+    const isMinor = quality.startsWith('m');
+    const third = (root + (isMinor ? 3 : 4)) % 12;
     const fifth = (root + 7) % 12;
     const triadRef = Math.max(chroma[root], chroma[third], chroma[fifth]);
 
@@ -157,17 +160,17 @@ export class ChordDetector {
     const thresh = triadRef * 0.45;
 
     if (M7 > b7 && M7 > thresh) {
-      return { ...det, quality: quality === 'm' ? 'mMaj7' : 'Maj7' };
+      return { ...det, quality: isMinor ? 'mMaj7' : 'Maj7' };
     }
     if (b7 > thresh) {
-      if (add2 > thresh * 0.9) return { ...det, quality: quality === 'm' ? 'm9' : '9' };
-      return { ...det, quality: quality === 'm' ? 'm7' : '7' };
+      if (add2 > thresh * 0.9) return { ...det, quality: isMinor ? 'm9' : '9' };
+      return { ...det, quality: isMinor ? 'm7' : '7' };
     }
     if (sixth > thresh) {
-      if (add2 > thresh * 0.9) return { ...det, quality: quality === 'm' ? 'm6/9' : '6/9' };
-      return { ...det, quality: quality === 'm' ? 'm6' : '6' };
+      if (add2 > thresh * 0.9) return { ...det, quality: isMinor ? 'm6/9' : '6/9' };
+      return { ...det, quality: isMinor ? 'm6' : '6' };
     }
-    if (add2 > thresh) return { ...det, quality: (quality === 'm' ? 'madd9' : 'add9') };
+    if (add2 > thresh) return { ...det, quality: (isMinor ? 'madd9' : 'add9') };
 
     return det;
   }
@@ -315,23 +318,27 @@ export class ChordDetector {
   _buildTemplates() {
     const N = (v) => this._norm(v);
 
-    // triads
-    const maj  = N([1,0,0,0,0.75,0,0,0.9,0,0,0,0]);  // R,3,5
-    const min  = N([1,0,0,0.75,0,0,0,0.9,0,0,0,0]);  // R,b3,5
-    const dim  = N([1,0,0,0.75,0,0,0.65,0,0,0,0,0]); // R,b3,b5
-    const aug  = N([1,0,0,0,0.75,0,0,0,0.75,0,0,0]); // R,3,#5
+    // triads and sixths
+    const maj  = N([1,0,0,0,0.75,0,0,0.9,0,0,0,0]);       // R,3,5
+    const min  = N([1,0,0,0.75,0,0,0,0.9,0,0,0,0]);       // R,b3,5
+    const dim  = N([1,0,0,0.75,0,0,0.65,0,0,0,0,0]);      // R,b3,b5
+    const aug  = N([1,0,0,0,0.75,0,0,0,0.75,0,0,0]);      // R,3,#5
+    const maj6 = N([1,0,0,0,0.75,0,0,0.9,0,0.65,0,0]);    // R,3,5,6
+    const min6 = N([1,0,0,0.75,0,0,0,0.9,0,0.65,0,0]);    // R,b3,5,6
 
     // guitar-friendly shapes
-    const pow5 = N([1,0,0,0,0,0,0,0.9,0,0,0,0]);     // R,5 (no 3rd)
-    const sus2 = N([1,0.85,0,0,0,0,0,0.9,0,0,0,0]);  // R,2,5
-    const sus4 = N([1,0,0,0,0,0.85,0,0.9,0,0,0,0]);  // R,4,5
+    const pow5 = N([1,0,0,0,0,0,0,0.9,0,0,0,0]);         // R,5 (no 3rd)
+    const sus2 = N([1,0.85,0,0,0,0,0,0.9,0,0,0,0]);      // R,2,5
+    const sus4 = N([1,0,0,0,0,0.85,0,0.9,0,0,0,0]);      // R,4,5
 
     return [
-      { vec: maj,  suffix: ''   },
-      { vec: min,  suffix: 'm'  },
-      { vec: dim,  suffix: 'dim'},
-      { vec: aug,  suffix: 'aug'},
-      { vec: pow5, suffix: '5'  },
+      { vec: maj,  suffix: ''    },
+      { vec: min,  suffix: 'm'   },
+      { vec: dim,  suffix: 'dim' },
+      { vec: aug,  suffix: 'aug' },
+      { vec: maj6, suffix: '6'   },
+      { vec: min6, suffix: 'm6'  },
+      { vec: pow5, suffix: '5'   },
       { vec: sus2, suffix: 'sus2' },
       { vec: sus4, suffix: 'sus4' },
     ];
