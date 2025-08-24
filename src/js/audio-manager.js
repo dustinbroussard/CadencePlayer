@@ -170,16 +170,27 @@ export class AudioManager {
   }
 
   clearQueue() {
-    // Disconnect any existing track sources
-    this.queue.forEach(t => t.source && t.source.disconnect());
+    // Disconnect and release any existing track resources
+    this.queue.forEach(track => {
+      if (track.source) {
+        track.source.disconnect();
+        track.source = null;
+      }
+      if (track.url) {
+        URL.revokeObjectURL(track.url);
+      }
+    });
+
     this.queue = [];
     this.currentIndex = -1;
     this.isPlaying = false;
+
     if (this.source) {
       this.source.mediaElement.pause();
       this.source.mediaElement.currentTime = 0;
       this.source = null;
     }
+
     this.emit('track-loaded', null);
     this.emit('queue-updated');
   }
