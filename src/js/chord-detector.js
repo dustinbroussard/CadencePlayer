@@ -5,16 +5,6 @@ export class ChordDetector {
     this.sampleRate = opts.sampleRate ?? 44100;
     this.fftSize = analyser.fftSize ?? 16384;
 
-    this.useWorker = opts.useWorker ?? false;
-    if (this.useWorker && typeof Worker !== 'undefined') {
-      this.worker = new Worker(new URL('./chord-detector-worker.js', import.meta.url), { type: 'module' });
-      this.worker.onmessage = (e) => {
-        if (e.data && e.data.name) {
-          this.onChord(e.data);
-        }
-      };
-    }
-
     this.fftBins = new Float32Array(this.fftSize / 2);
     this.pitchClassEnergy = new Float32Array(12);
     this.chromaEma = new Float32Array(12);
@@ -121,15 +111,6 @@ export class ChordDetector {
     }
 
     this.analyser.getFloatFrequencyData(this.fftBins);
-
-    if (this.worker) {
-      this.worker.postMessage({
-        fftData: Array.from(this.fftBins),
-        sampleRate: this.sampleRate,
-        config: {}
-      });
-      return;
-    }
     
     // Compute spectral features for better analysis
     this._computeSpectralFeatures();
@@ -145,11 +126,9 @@ export class ChordDetector {
     this._updateAdaptiveGate(totalEnergy);
     
     if (totalEnergy < this.dynamicGate || this.spectralClarity < 0.3) {
-      if (this.confEnter > 0) {
-        this._handleSilence();
-        this._resetDiagnostics();
-        return;
-      }
+      this._handleSilence();
+      this._resetDiagnostics();
+      return;
     }
 
     // Multi-dimensional harmonic analysis
@@ -738,80 +717,6 @@ export class ChordDetector {
     }
     
     return this.requiredStableFrames;
-  }
-
-  // Public helper to expose chord tones
-  getChordTones(root, quality) {
-    return this._getChordTones(root, quality);
-  }
-
-  // Export a simple MIDI representation of a chord progression
-  exportMIDI(chordProgression, bpm = 120) {
-    const events = [];
-    chordProgression.forEach((chord, index) => {
-      const startTime = index * (60000 / bpm);
-      const tones = this.getChordTones(chord.root, chord.quality);
-      tones.forEach(note => {
-        events.push({ note: note + 60, start: startTime, duration: 1000 });
-      });
-    });
-    return events;
-  }
-
-  // Detect the most likely key signature from a chord history
-  detectKeySignature(chordHistory) {
-    const majorKeys = [
-      { key: 'C', chords: ['C', 'Dm', 'Em', 'F', 'G', 'Am', 'Bdim'] },
-      { key: 'G', chords: ['G', 'Am', 'Bm', 'C', 'D', 'Em', 'F#dim'] },
-      { key: 'D', chords: ['D', 'Em', 'F#m', 'G', 'A', 'Bm', 'C#dim'] }
-    ];
-
-    const minorKeys = [
-      { key: 'Am', chords: ['Am', 'Bdim', 'C', 'Dm', 'Em', 'F', 'G'] }
-    ];
-
-    let bestMatch = { key: 'C', confidence: 0 };
-
-    [...majorKeys, ...minorKeys].forEach(keyData => {
-      let matches = 0;
-      chordHistory.forEach(chord => {
-        if (keyData.chords.includes(chord.root)) matches++;
-      });
-
-      const confidence = matches / chordHistory.length;
-      if (confidence > bestMatch.confidence) {
-        bestMatch = { key: keyData.key, confidence };
-      }
-    });
-
-    return bestMatch;
-  }
-
-  chordToRomanNumeral(chord, key) {
-    const scales = {
-      'C': ['C', 'Dm', 'Em', 'F', 'G', 'Am', 'Bdim'],
-      'G': ['G', 'Am', 'Bm', 'C', 'D', 'Em', 'F#dim'],
-      'D': ['D', 'Em', 'F#m', 'G', 'A', 'Bm', 'C#dim'],
-      'Am': ['Am', 'Bdim', 'C', 'Dm', 'Em', 'F', 'G']
-    };
-    const numerals = ['I', 'ii', 'iii', 'IV', 'V', 'vi', 'vii°'];
-    const chords = scales[key];
-    if (!chords) return '';
-    const idx = chords.indexOf(chord);
-    return idx >= 0 ? numerals[idx] : '';
-  }
-
-  // Suggest next chords based on simple progressions
-  suggestNextChords(currentChord, key) {
-    const progressions = {
-      'I': ['ii', 'iii', 'IV', 'V', 'vi'],
-      'ii': ['V', 'viiø'],
-      'V': ['I', 'vi'],
-      'vi': ['ii', 'IV', 'V']
-    };
-
-    const romanNumeral = this.chordToRomanNumeral(currentChord, key);
-    return progressions[romanNumeral] || [];
   }
 
   _handleSilence() {
