@@ -52,6 +52,9 @@
               dark_mode
             </span>
           </button>
+          <button id="toggle-chord-viz-btn" class="control-btn">
+            <span class="material-symbols-outlined">music_note</span>
+          </button>
         </div>
         <ul id="queue" class="queue-list"></ul>
       </div>
@@ -59,6 +62,7 @@
       <div class="main-content">
         <div id="visualizer-container">
           <canvas id="visualizer" class="visualizer-canvas"></canvas>
+          <div id="chord-visualization" class="hidden"></div>
         </div>
       </div>
     </div>
@@ -128,6 +132,6 @@
   </div>
 
   <!-- Correct path to renderer script -->
-  <script src="src/js/renderer.js" type="module"></script>
+  <script src="src/js/enhanced-renderer.js" type="module"></script>
 </body>
 </html>

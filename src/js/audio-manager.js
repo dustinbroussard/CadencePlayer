@@ -1,3 +1,5 @@
+import { CONFIG } from './config.js';
+
 export class AudioManager {
   constructor() {
     this.ctx = new AudioContext();
@@ -27,7 +29,7 @@ export class AudioManager {
     this.eventListeners = new Map();
     
     // EQ setup
-    this.filters = [60, 230, 910, 4000, 14000].map(f => {
+    this.filters = CONFIG.AUDIO.EQ_FREQUENCIES.map(f => {
       const filter = this.ctx.createBiquadFilter();
       filter.type = 'peaking';
       filter.frequency.value = f;
@@ -97,8 +99,8 @@ export class AudioManager {
     if (eqOutput) eqOutput.connect(this.ctx.destination);
 
     // Create a master gain as the tee point for analysers + EQ
-    this.masterGain = this.ctx.createGain();
-    this.masterGain.gain.value = 1;
+      this.masterGain = this.ctx.createGain();
+      this.masterGain.gain.value = CONFIG.AUDIO.MASTER_VOLUME;
     // Light shelves to balance spectrum for chord detection
     this.lowShelf = this.ctx.createBiquadFilter();
     this.lowShelf.type = 'lowshelf';
@@ -142,27 +144,37 @@ export class AudioManager {
   }
 
   async addFilesToQueue(files) {
+    const failedFiles = [];
     for (const file of files) {
-      // Create a blob URL to load the file
-      const blob = await fetch(`file://${file.path}`).then(r => r.blob());
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      
-      // Get duration before adding to queue
-      await new Promise(resolve => {
-        audio.onloadedmetadata = () => {
-          this.queue.push({
-            path: file.path,
-            name: file.name,
-            url: url,
-            audio: audio,
-            duration: audio.duration,
-            source: null
-          });
-          resolve();
-        };
-      });
+      try {
+        const blob = await fetch(`file://${file.path}`).then(r => r.blob());
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+
+        await new Promise((resolve, reject) => {
+          audio.onloadedmetadata = () => resolve();
+          audio.onerror = () => reject(new Error(`Failed to load ${file.name}`));
+          setTimeout(() => reject(new Error(`Timeout loading ${file.name}`)), 10000);
+        });
+
+        this.queue.push({
+          path: file.path,
+          name: file.name,
+          url,
+          audio,
+          duration: audio.duration,
+          source: null
+        });
+      } catch (error) {
+        console.error(`Error loading ${file.name}:`, error);
+        failedFiles.push({ file: file.name, error: error.message });
+      }
     }
+
+    if (failedFiles.length > 0) {
+      this.emit('files-failed', failedFiles);
+    }
+
     this.emit('queue-updated');
     if (this.queue.length === files.length) {
       this.playTrack(0);
@@ -170,8 +182,16 @@ export class AudioManager {
   }
 
   clearQueue() {
-    // Disconnect any existing track sources
-    this.queue.forEach(t => t.source && t.source.disconnect());
+    // Disconnect any existing track sources and revoke URLs
+    this.queue.forEach(track => {
+      if (track.source) {
+        track.source.disconnect();
+        track.source = null;
+      }
+      if (track.url) {
+        URL.revokeObjectURL(track.url);
+      }
+    });
     this.queue = [];
     this.currentIndex = -1;
     this.isPlaying = false;

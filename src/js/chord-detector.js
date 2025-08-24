@@ -1,9 +1,12 @@
 // Enhanced chord-detector.js with dramatic improvements
+import { MIDIFile } from './midi-file.js';
+
 export class ChordDetector {
   constructor(analyser, opts = {}) {
     this.analyser = analyser;
     this.sampleRate = opts.sampleRate ?? 44100;
     this.fftSize = analyser.fftSize ?? 16384;
+    this.opts = { ...opts };
 
     this.fftBins = new Float32Array(this.fftSize / 2);
     this.pitchClassEnergy = new Float32Array(12);
@@ -83,6 +86,18 @@ export class ChordDetector {
     this._started = false;
     
     this.onChord = () => {};
+
+    this.useWorker = opts.useWorker ?? false;
+    if (this.useWorker && typeof Worker !== 'undefined') {
+      this.workerConfig = { ...opts, sampleRate: this.sampleRate };
+      this.worker = new Worker(new URL('./chord-detector-worker.js', import.meta.url), { type: 'module' });
+      this.worker.onmessage = (e) => {
+        this.lastChord = e.data;
+        this.onChord(e.data);
+      };
+    } else {
+      this.worker = null;
+    }
   }
 
   setOnChord(cb) { this.onChord = cb; }
@@ -111,10 +126,15 @@ export class ChordDetector {
     }
 
     this.analyser.getFloatFrequencyData(this.fftBins);
-    
+
+    if (this.worker) {
+      this.worker.postMessage({ fftData: this.fftBins.slice(), config: this.workerConfig });
+      return;
+    }
+
     // Compute spectral features for better analysis
     this._computeSpectralFeatures();
-    
+
     const chroma = this._computeEnhancedChroma();
     if (!chroma) {
       this._resetDiagnostics();
@@ -126,9 +146,11 @@ export class ChordDetector {
     this._updateAdaptiveGate(totalEnergy);
     
     if (totalEnergy < this.dynamicGate || this.spectralClarity < 0.3) {
-      this._handleSilence();
-      this._resetDiagnostics();
-      return;
+      if (this.confEnter > 0) {
+        this._handleSilence();
+        this._resetDiagnostics();
+        return;
+      }
     }
 
     // Multi-dimensional harmonic analysis
@@ -680,8 +702,23 @@ export class ChordDetector {
     if (quality.includes('6')) {
       tones.push((root + 9) % 12); // Sixth
     }
-    
+
     return tones;
+  }
+
+  exportMIDI(chordProgression, bpm = 120) {
+    const midiData = new MIDIFile();
+
+    chordProgression.forEach((chord, index) => {
+      const startTime = index * (60000 / bpm);
+      const chordTones = this._getChordTones(chord.root, chord.quality || '');
+
+      chordTones.forEach(note => {
+        midiData.addNote(0, note + 60, startTime, startTime + 1000);
+      });
+    });
+
+    return midiData.export();
   }
 
   _updateAdaptiveThreshold(detection) {
@@ -952,4 +989,14 @@ export class ChordDetector {
 
     return templates;
   }
+}
+
+export function performChordDetection(fftData, config = {}) {
+  const analyser = {
+    fftSize: fftData.length * 2,
+    getFloatFrequencyData: (arr) => arr.set(fftData)
+  };
+  const detector = new ChordDetector(analyser, config);
+  detector.update();
+  return detector.lastChord;
 }

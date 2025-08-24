@@ -396,23 +396,12 @@ export class ChordVisualizer {
 
   analyzeProgression(chords) {
     if (chords.length < 3) return;
-    
-    // Simple key analysis based on chord frequency
-    const rootCounts = {};
-    chords.forEach(chord => {
-      const root = chord.root || this.noteToIndex(chord.name.charAt(0));
-      rootCounts[root] = (rootCounts[root] || 0) + 1;
-    });
-    
-    const likelyKey = Object.keys(rootCounts).reduce((a, b) => 
-      rootCounts[a] > rootCounts[b] ? a : b);
-    
+
+    const keyInfo = this.detectKeySignature(chords);
     if (this.elements.keySignature) {
-      this.elements.keySignature.textContent = 
-        `Key: ${this.indexToNote(parseInt(likelyKey))}`;
+      this.elements.keySignature.textContent = `Key: ${keyInfo.key}`;
     }
-    
-    // Detect common progressions
+
     const progression = this.detectProgressionPattern(chords);
     if (this.elements.progressionPattern && progression) {
       this.elements.progressionPattern.textContent = progression;
@@ -443,6 +432,71 @@ export class ChordVisualizer {
     }
     
     return 'Custom Progression';
+  }
+
+  detectKeySignature(chordHistory) {
+    const majorKeys = [
+      { key: 'C', chords: ['C', 'Dm', 'Em', 'F', 'G', 'Am', 'Bdim'] },
+      { key: 'G', chords: ['G', 'Am', 'Bm', 'C', 'D', 'Em', 'F#dim'] },
+      { key: 'D', chords: ['D', 'Em', 'F#m', 'G', 'A', 'Bm', 'C#dim'] },
+      { key: 'A', chords: ['A', 'Bm', 'C#m', 'D', 'E', 'F#m', 'G#dim'] },
+      { key: 'E', chords: ['E', 'F#m', 'G#m', 'A', 'B', 'C#m', 'D#dim'] },
+      { key: 'B', chords: ['B', 'C#m', 'D#m', 'E', 'F#', 'G#m', 'A#dim'] },
+      { key: 'F#', chords: ['F#', 'G#m', 'A#m', 'B', 'C#', 'D#m', 'E#dim'] },
+      { key: 'C#', chords: ['C#', 'D#m', 'E#m', 'F#', 'G#', 'A#m', 'B#dim'] },
+      { key: 'F', chords: ['F', 'Gm', 'Am', 'Bb', 'C', 'Dm', 'Edim'] },
+      { key: 'Bb', chords: ['Bb', 'Cm', 'Dm', 'Eb', 'F', 'Gm', 'Adim'] },
+      { key: 'Eb', chords: ['Eb', 'Fm', 'Gm', 'Ab', 'Bb', 'Cm', 'Ddim'] },
+      { key: 'Ab', chords: ['Ab', 'Bbm', 'Cm', 'Db', 'Eb', 'Fm', 'Gdim'] }
+    ];
+
+    const minorKeys = [
+      { key: 'Am', chords: ['Am', 'Bdim', 'C', 'Dm', 'Em', 'F', 'G'] },
+      { key: 'Em', chords: ['Em', 'F#dim', 'G', 'Am', 'Bm', 'C', 'D'] },
+      { key: 'Dm', chords: ['Dm', 'Edim', 'F', 'Gm', 'Am', 'Bb', 'C'] }
+    ];
+
+    let bestMatch = { key: 'C', confidence: 0 };
+    [...majorKeys, ...minorKeys].forEach(keyData => {
+      let matches = 0;
+      chordHistory.forEach(chord => {
+        const root = chord.name || '';
+        if (keyData.chords.includes(root)) matches++;
+      });
+
+      const confidence = matches / chordHistory.length;
+      if (confidence > bestMatch.confidence) {
+        bestMatch = { key: keyData.key, confidence };
+      }
+    });
+
+    return bestMatch;
+  }
+
+  chordToRomanNumeral(chord, key) {
+    const scale = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+    const keyRoot = key.replace('m', '');
+    const keyIndex = scale.indexOf(keyRoot);
+    const majorDegrees = ['I','ii','iii','IV','V','vi','vii°'];
+    const minorDegrees = ['i','ii°','III','iv','v','VI','VII'];
+    const steps = key.endsWith('m') ? [0,2,3,5,7,8,10] : [0,2,4,5,7,9,11];
+    const chordRoot = chord.replace(/[^A-G#]/g, '');
+    const chordIndex = scale.indexOf(chordRoot);
+    if (keyIndex === -1 || chordIndex === -1) return '';
+    const degreeIdx = steps.indexOf((chordIndex - keyIndex + 12) % 12);
+    if (degreeIdx === -1) return '';
+    return key.endsWith('m') ? minorDegrees[degreeIdx] : majorDegrees[degreeIdx];
+  }
+
+  suggestNextChords(currentChord, key) {
+    const progressions = {
+      'I': ['ii', 'iii', 'IV', 'V', 'vi'],
+      'ii': ['V', 'viiø'],
+      'V': ['I', 'vi'],
+      'vi': ['ii', 'IV', 'V']
+    };
+    const roman = this.chordToRomanNumeral(currentChord, key);
+    return progressions[roman] || [];
   }
 
   clearDisplay() {
