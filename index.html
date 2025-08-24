@@ -5,6 +5,7 @@
   <title>Cadence Player</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark light">
+  <!-- Ensure stylesheet path matches actual location -->
   <link rel="stylesheet" href="src/css/styles.css">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
 </head>
@@ -62,11 +63,13 @@
       </div>
     </div>
 
-    <div class="player-bar-container">
+  <div class="player-bar-container">
       <div class="track-info">
         <div id="current-track-name" class="track-name">No track loaded</div>
         <div id="current-track-duration" class="track-duration"></div>
         <div id="chord-readout" class="chord-readout dim">—</div>
+        <!-- Hidden diagnostic readout toggled via "D" key -->
+        <div id="diag" class="diag hidden"></div>
       </div>
 
       <div class="player-controls">
@@ -124,6 +127,7 @@
     </div>
   </div>
 
+  <!-- Correct path to renderer script -->
   <script src="src/js/renderer.js" type="module"></script>
 </body>
 </html>

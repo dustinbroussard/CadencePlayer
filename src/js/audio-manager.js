@@ -9,10 +9,14 @@ export class AudioManager {
 
     // Chord analyser (high resolution FFT)
     this.chordAnalyser = this.ctx.createAnalyser();
-    this.chordAnalyser.fftSize = 16384;
-    this.chordAnalyser.smoothingTimeConstant = 0.0;
-    this.chordAnalyser.minDecibels = -100;
-    this.chordAnalyser.maxDecibels = -20;
+    try {
+      this.chordAnalyser.fftSize = 32768; // use higher resolution if supported
+    } catch {
+      this.chordAnalyser.fftSize = 16384; // fallback for older browsers
+    }
+    this.chordAnalyser.smoothingTimeConstant = 0.12; // allow slight temporal smoothing
+    this.chordAnalyser.minDecibels = -110; // extend dynamic range for quiet passages
+    this.chordAnalyser.maxDecibels = -10;  // raise ceiling to avoid clipping
 
     this.source = null;
     this.queue = [];
@@ -95,14 +99,46 @@ export class AudioManager {
     // Create a master gain as the tee point for analysers + EQ
     this.masterGain = this.ctx.createGain();
     this.masterGain.gain.value = 1;
+    // Light shelves to balance spectrum for chord detection
+    this.lowShelf = this.ctx.createBiquadFilter();
+    this.lowShelf.type = 'lowshelf';
+    this.lowShelf.frequency.value = 120;
+    this.lowShelf.gain.value = -3;
+    this.highShelf = this.ctx.createBiquadFilter();
+    this.highShelf.type = 'highshelf';
+    this.highShelf.frequency.value = 2500;
+    this.highShelf.gain.value = -2;
 
-    // masterGain -> EQ input (if any)
-    if (eqInput) this.masterGain.connect(eqInput);
-    else this.masterGain.connect(this.ctx.destination);
+    // masterGain -> lowShelf -> highShelf -> EQ/destination
+    if (eqInput) {
+      this.masterGain.connect(this.lowShelf);
+      this.lowShelf.connect(this.highShelf);
+      this.highShelf.connect(eqInput);
+    } else {
+      this.masterGain.connect(this.lowShelf);
+      this.lowShelf.connect(this.highShelf);
+      this.highShelf.connect(this.ctx.destination);
+    }
 
-    // Also feed both analysers in parallel
-    this.masterGain.connect(this.analyser);
-    this.masterGain.connect(this.chordAnalyser);
+    // Feed analysers post-shelves for cleaner data
+    this.highShelf.connect(this.analyser);
+    this.highShelf.connect(this.chordAnalyser);
+    // Time-domain analyser for RMS gating
+    this.timeAnalyser = this.ctx.createAnalyser();
+    this.timeAnalyser.fftSize = 2048;
+    this.highShelf.connect(this.timeAnalyser);
+  }
+
+  // Return current RMS level of the signal [0..1]
+  getCurrentRms() {
+    const buf = new Uint8Array(this.timeAnalyser.fftSize);
+    this.timeAnalyser.getByteTimeDomainData(buf);
+    let sum = 0;
+    for (let i = 0; i < buf.length; i++) {
+      const v = (buf[i] - 128) / 128; // convert to [-1,1]
+      sum += v * v;
+    }
+    return Math.sqrt(sum / buf.length);
   }
 
   async addFilesToQueue(files) {
