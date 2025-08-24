@@ -8,13 +8,18 @@ class Renderer {
     this.visualizer = new Visualizer('visualizer', this.audioManager.getAnalyser());
     this.chordDetector = new ChordDetector(this.audioManager.getChordAnalyser(), {
       sampleRate: this.audioManager.ctx.sampleRate,
-      // Configure chord detector to announce chords a little quicker and at a
-      // slightly lower confidence than the defaults.
+      // Tune detector for quicker response and smoother confidence
       confEnter: 0.4,
       confExit: 0.32,
       holdMsEnter: 500,
       holdMsExit: 250,
-      requiredStableFrames: 2
+      requiredStableFrames: 2,
+      harmonicThreshold: 0.15,
+      noiseFloorAlpha: 0.06,
+      chromaAlpha: 0.30,
+      // Provide RMS data for gating
+      getRms: () => this.audioManager.getCurrentRms(),
+      rmsGate: 0.02
     });
     
     // UI Elements
@@ -24,6 +29,7 @@ class Renderer {
     this.trackNameEl = document.getElementById('current-track-name');
     this.trackDurationEl = document.getElementById('current-track-duration');
     this.chordReadout = document.getElementById('chord-readout');
+    this.diagEl = document.getElementById('diag'); // diagnostics overlay
     this.playPauseBtn = document.getElementById('play-pause-btn');
     this.playIcon = document.getElementById('play-icon');
     this.pauseIcon = document.getElementById('pause-icon');
@@ -72,7 +78,8 @@ class Renderer {
         setTimeout(() => this.chordReadout && this.chordReadout.classList.remove('pulse'), 120);
       }
     });
-    this.chordDetector.start();
+    // Flag ensures detector starts only once per track
+    this.detectorRunning = false;
   }
 
   getChordColors(name) {
@@ -85,6 +92,27 @@ class Renderer {
     if (quality.includes('7') || quality.includes('9')) return { fg: '#fbbf24', bg: 'rgba(251,191,36,0.15)' };
     if (quality.includes('5')) return { fg: '#a1a1aa', bg: 'rgba(161,161,170,0.15)' };
     return { fg: '#4ade80', bg: 'rgba(74,222,128,0.15)' }; // major/default
+  }
+
+  // Start detector only when audio context is running and audio is flowing
+  startChordDetectorWhenReady() {
+    if (this.detectorRunning) return; // prevent multiple loops
+    const startTime = performance.now();
+    let lastTime = 0;
+    const tryStart = () => {
+      const ctx = this.audioManager.ctx;
+      const src = this.audioManager.getCurrentSource();
+      const running = ctx && ctx.state === 'running';
+      const playing = src && !src.paused && src.duration > 0 && src.currentTime > lastTime;
+      lastTime = src ? src.currentTime : 0;
+      if (running && playing) {
+        this.chordDetector.start();
+        this.detectorRunning = true;
+        return;
+      }
+      if (performance.now() - startTime < 2000) requestAnimationFrame(tryStart);
+    };
+    tryStart();
   }
 
   initEventListeners() {
@@ -107,9 +135,23 @@ class Renderer {
     this.darkModeToggle.addEventListener('click', () => this.toggleDarkMode());
 
     // Audio Manager events
-    this.audioManager.on('track-loaded', (track) => this.updateTrackInfo(track));
+    this.audioManager.on('track-loaded', (track) => {
+      this.updateTrackInfo(track);
+      this.detectorRunning = false; // allow detector to restart for new track
+      this.startChordDetectorWhenReady();
+    });
     this.audioManager.on('playback-ended', () => this.handlePlaybackEnd());
     this.audioManager.on('queue-updated', () => this.renderQueue());
+
+    // Kick off chord detector after first user interaction
+    document.addEventListener('click', () => this.startChordDetectorWhenReady(), { once: true });
+
+    // Toggle diagnostics overlay with "D"
+    document.addEventListener('keydown', (e) => {
+      if (e.key.toLowerCase() === 'd' && this.diagEl) {
+        this.diagEl.classList.toggle('hidden');
+      }
+    });
 
     // Start the visualizer
     this.visualizer.start();
@@ -155,6 +197,7 @@ class Renderer {
       this.audioManager.play();
       this.playIcon.classList.add('hidden');
       this.pauseIcon.classList.remove('hidden');
+      this.startChordDetectorWhenReady(); // ensure detector starts when playback begins
     }
   }
 
@@ -260,7 +303,17 @@ class Renderer {
       this.visualizer.draw();
       this.updateProgressBar();
     }
+    this.updateDiagnostics(); // refresh diagnostic overlay if visible
     requestAnimationFrame(this.update.bind(this));
+  }
+
+  // Update diagnostic overlay with live metrics
+  updateDiagnostics() {
+    if (!this.diagEl || this.diagEl.classList.contains('hidden')) return;
+    const { noiseFloor, activeBins, confidence } = this.chordDetector.getDiagnostics();
+    const rms = this.audioManager.getCurrentRms().toFixed(3);
+    this.diagEl.textContent = `RMS: ${rms} | noiseFloor: ${noiseFloor.toFixed(3)} | ` +
+      `activeBins: ${activeBins} | conf: ${confidence.toFixed(2)}`;
   }
 
   updateProgressBar() {

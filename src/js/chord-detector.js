@@ -23,12 +23,18 @@ export class ChordDetector {
     this.confExit  = opts.confExit  ?? 0.32;
 
     // Activity detection
-    this.harmonicThreshold = opts.harmonicThreshold ?? 0.2;
-    this.noiseFloorAlpha = opts.noiseFloorAlpha ?? 0.08;  // EMA for noise floor
+    this.harmonicThreshold = opts.harmonicThreshold ?? 0.15; // lower gate for small chords
+    this.noiseFloorAlpha = opts.noiseFloorAlpha ?? 0.06;  // slower-rising noise floor
     this.noiseFloor = 0;
 
     // Smoothing
-    this.chromaAlpha = opts.chromaAlpha ?? 0.35; // EMA smoothing
+    this.chromaAlpha = opts.chromaAlpha ?? 0.30; // slightly more smoothing
+
+    // Optional RMS gating
+    this.getRms = opts.getRms ?? null;
+    this.rmsGate = opts.rmsGate ?? 0.02;
+    this.quietFrames = 0;
+    this.quietFramesMax = 3;
 
     // Root biasing from bass region
     this.enableBassBias = opts.enableBassBias ?? true;
@@ -48,11 +54,17 @@ export class ChordDetector {
     this.maxHistoryLength = 10;
     this.stableChordCount = 0;
 
+    this.activeBins = 0; // diagnostics: count of harmonic bins
+    this.currentConfidence = 0; // diagnostics: latest confidence
+    this._started = false; // guard against multiple start() calls
+
     this.onChord = () => {};
   }
 
   setOnChord(cb) { this.onChord = cb; }
   start() {
+    if (this._started) return; // avoid multiple RAF loops
+    this._started = true;
     const tick = () => { this.update(); requestAnimationFrame(tick); };
     requestAnimationFrame(tick);
   }
@@ -60,9 +72,27 @@ export class ChordDetector {
   update() {
     if (!this.analyser) return;
 
+    // Lightweight RMS gate to avoid reacting to silence/noise
+    if (this.getRms) {
+      const rms = this.getRms();
+      if (rms < this.rmsGate) {
+        if (++this.quietFrames >= this.quietFramesMax) {
+          this._handleSilence();
+          this.activeBins = 0;
+          this.currentConfidence = 0;
+        }
+        return;
+      }
+      this.quietFrames = 0;
+    }
+
     this.analyser.getFloatFrequencyData(this.fftBins);
     const chroma = this._computeChroma();
-    if (!chroma) return;
+    if (!chroma) {
+      this.activeBins = 0;
+      this.currentConfidence = 0;
+      return;
+    }
 
     // Adaptive noise floor & activity gate
     const totalEnergy = chroma.reduce((s, v) => s + v, 0);
@@ -70,13 +100,17 @@ export class ChordDetector {
     const gate = Math.max(0.04, this.noiseFloor * 1.3);
     if (totalEnergy < gate) {
       this._handleSilence();
+      this.activeBins = 0;
+      this.currentConfidence = 0;
       return;
     }
 
     // Need enough distinct pitch classes to be “chord-like”
     const active = chroma.filter(v => v > totalEnergy * this.harmonicThreshold).length;
+    this.activeBins = active; // expose for diagnostics
     if (active < 2) {
       this._handleSingleNote();
+      this.currentConfidence = 0;
       return;
     }
 
@@ -91,7 +125,8 @@ export class ChordDetector {
     }
 
     const detection = this._findBestChord(biasedChroma);
-    if (!detection) { this._handleLowConfidence(); return; }
+    if (!detection) { this.currentConfidence = 0; this._handleLowConfidence(); return; }
+    this.currentConfidence = detection.confidence;
 
     // Hysteresis thresholds
     const enterOK = detection.confidence >= this.confEnter;
@@ -113,12 +148,21 @@ export class ChordDetector {
       }
     } else {
       // Same chord—maintain or clear with exit hysteresis + time
-      if (exitOK) {
-        this.stableChordCount = Math.min(this.stableChordCount + 1, this.requiredStableFrames);
-      } else if ((now - this.lastChangeTime) > this.holdMsExit) {
-        this._clearChord();
-      }
+    if (exitOK) {
+      this.stableChordCount = Math.min(this.stableChordCount + 1, this.requiredStableFrames);
+    } else if ((now - this.lastChangeTime) > this.holdMsExit) {
+      this._clearChord();
     }
+    }
+  }
+
+  // Provide diagnostic values for UI overlay
+  getDiagnostics() {
+    return {
+      noiseFloor: this.noiseFloor,
+      activeBins: this.activeBins,
+      confidence: this.currentConfidence
+    };
   }
 
   _findBestChord(chroma) {
