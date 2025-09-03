@@ -2,7 +2,9 @@ import { AudioManager } from './audio-manager.js';
 import { Visualizer } from './visualizer.js';
 import { ChordDetector } from './chord-detector.js';
 
-class Renderer {
+// Exported so tests can instantiate and exercise behaviour without relying on
+// the global DOMContentLoaded hook at the bottom of the file.
+export class Renderer {
   constructor() {
     this.audioManager = new AudioManager();
     this.visualizer = new Visualizer('visualizer', this.audioManager.getAnalyser());
@@ -49,6 +51,14 @@ class Renderer {
     this.minimizeBtn = document.getElementById('minimize-btn');
     this.maximizeBtn = document.getElementById('maximize-btn');
     this.closeBtn = document.getElementById('close-btn');
+    // Chord detection state/mode
+    this.detectorRunning = false; // ensures detector starts only once per track
+    this.chordsEnabled = true;
+    this.chordMode = 'lowcpu'; // 'responsive' | 'normal' | 'accurate' | 'lowcpu'
+
+    // Restore persisted preferences before wiring up handlers so UI reflects
+    // the user's last session immediately on launch.
+    this.loadPreferences();
 
     this.initEventListeners();
     this.initEqControls();
@@ -80,10 +90,6 @@ class Renderer {
         setTimeout(() => this.chordReadout && this.chordReadout.classList.remove('pulse'), 120);
       }
     });
-    // Chord detection state/mode
-    this.detectorRunning = false; // ensures detector starts only once per track
-    this.chordsEnabled = true;
-    this.chordMode = 'lowcpu'; // 'responsive' | 'normal' | 'accurate' | 'lowcpu'
     this.applyChordMode(this.chordMode);
   }
 
@@ -119,6 +125,33 @@ class Renderer {
     tryStart();
   }
 
+  // Load persisted preferences for dark mode, volume and chord options.
+  loadPreferences() {
+    const dark = localStorage.getItem('darkMode');
+    if (dark === 'true') {
+      document.body.classList.add('dark-mode');
+    }
+
+    const vol = parseFloat(localStorage.getItem('volume'));
+    if (!isNaN(vol)) {
+      this.volumeSlider.value = vol;
+      this.audioManager.setVolume(vol);
+    }
+
+    const savedChords = localStorage.getItem('chordsEnabled');
+    if (savedChords === 'false') {
+      this.chordsEnabled = false;
+    }
+
+    const savedMode = localStorage.getItem('chordMode');
+    if (savedMode) {
+      this.chordMode = savedMode;
+    }
+
+    // Ensure UI reflects the restored settings
+    this.updateChordToggleUi();
+  }
+
   initEventListeners() {
     // Custom title bar
     this.minimizeBtn.addEventListener('click', () => window.electronAPI.minimizeWindow());
@@ -131,7 +164,11 @@ class Renderer {
     this.playPauseBtn.addEventListener('click', () => this.togglePlayback());
     this.nextBtn.addEventListener('click', () => this.nextTrack());
     this.prevBtn.addEventListener('click', () => this.prevTrack());
-    this.volumeSlider.addEventListener('input', (e) => this.audioManager.setVolume(e.target.value));
+    this.volumeSlider.addEventListener('input', (e) => {
+      const v = e.target.value;
+      this.audioManager.setVolume(v);
+      localStorage.setItem('volume', v);
+    });
     this.progressBar.addEventListener('input', (e) => this.seekTrack(e.target.value));
     this.shuffleBtn.addEventListener('click', () => this.toggleShuffle());
     this.repeatBtn.addEventListener('click', () => this.toggleRepeat());
@@ -363,7 +400,8 @@ class Renderer {
   }
 
   toggleDarkMode() {
-    document.body.classList.toggle('dark-mode');
+    const enabled = document.body.classList.toggle('dark-mode');
+    localStorage.setItem('darkMode', enabled);
   }
 
   toggleShuffle() {
@@ -389,6 +427,7 @@ class Renderer {
   // Chord detection controls
   toggleChords() {
     this.chordsEnabled = !this.chordsEnabled;
+    localStorage.setItem('chordsEnabled', this.chordsEnabled);
     this.updateChordToggleUi();
     if (!this.chordsEnabled) {
       this.chordDetector.stop();
@@ -410,6 +449,7 @@ class Renderer {
     const next = order[(order.indexOf(this.chordMode) + 1) % order.length];
     this.chordMode = next;
     this.applyChordMode(next);
+    localStorage.setItem('chordMode', next);
     this.updateChordToggleUi();
   }
 
