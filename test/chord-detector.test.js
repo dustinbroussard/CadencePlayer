@@ -114,6 +114,47 @@ describe('ChordDetector', () => {
     expect(detected.name).toBe('Cm6');
   });
 
+  it('detects a C13 chord', () => {
+    const fftSize = 16384;
+    const binsLength = fftSize / 2;
+    const fakeBins = new Float32Array(binsLength).fill(-Infinity);
+
+    const sampleRate = 44100;
+    const binHz = sampleRate / (2 * binsLength);
+    const freqToIndex = (f) => Math.round(f / binHz);
+    // C, E, G at full strength; Bb and A slightly quieter to simulate overtones
+    [261.63, 329.63, 392.0].forEach((freq) => {
+      fakeBins[freqToIndex(freq)] = 0;
+    });
+    [466.16, 440.0].forEach((freq) => {
+      fakeBins[freqToIndex(freq)] = -3;
+    });
+
+    const analyser = {
+      fftSize,
+      getFloatFrequencyData: (arr) => arr.set(fakeBins)
+    };
+
+    const detector = new ChordDetector(analyser, {
+      sampleRate,
+      confEnter: 0,
+      confExit: 0,
+      holdMsEnter: 0,
+      holdMsExit: 0,
+      requiredStableFrames: 1
+    });
+
+    let detected = null;
+    detector.setOnChord((chord) => {
+      detected = chord;
+    });
+
+    detector.update();
+
+    expect(detected).not.toBeNull();
+    expect(detected.name).toBe('C13');
+  });
+
   it('pcToName wraps out-of-range values', () => {
     const analyser = { fftSize: 2048, getFloatFrequencyData: () => {} };
     const detector = new ChordDetector(analyser);
