@@ -8,7 +8,9 @@ export class ChordDetector {
     this.fftBins = new Float32Array(this.fftSize / 2);
     this.pitchClassEnergy = new Float32Array(12);
     this.chromaEma = new Float32Array(12);
-    this.chromaHistory = Array(5).fill(null).map(() => new Float32Array(12));
+    // History buffers start uninitialised so early stability checks don't
+    // incorrectly assume we already have a full window of data
+    this.chromaHistory = Array(5).fill(null);
     this.historyIndex = 0;
 
     // Enhanced frequency analysis
@@ -696,13 +698,14 @@ export class ChordDetector {
     } else {
       tones.push((root + 6) % 12); // Diminished fifth
     }
-    
-    if (quality.includes('7')) {
-      tones.push((root + 10) % 12); // Minor seventh
-    }
-    
+
+    // Handle sevenths carefully: major seventh chords shouldn't include a
+    // flattened seventh as well. Check for Maj7 first then fall back to a
+    // dominant/minor seventh.
     if (quality.includes('Maj7')) {
       tones.push((root + 11) % 12); // Major seventh
+    } else if (quality.includes('7')) {
+      tones.push((root + 10) % 12); // Minor seventh
     }
     
     if (quality.includes('6')) {
