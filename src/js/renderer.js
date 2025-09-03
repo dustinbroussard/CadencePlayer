@@ -55,6 +55,8 @@ export class Renderer {
     this.detectorRunning = false; // ensures detector starts only once per track
     this.chordsEnabled = true;
     this.chordMode = 'lowcpu'; // 'responsive' | 'normal' | 'accurate' | 'lowcpu'
+    this.preferFlats = false;
+    this.currentChord = null;
 
     // Restore persisted preferences before wiring up handlers so UI reflects
     // the user's last session immediately on launch.
@@ -69,6 +71,7 @@ export class Renderer {
       if (!this.chordReadout) return;
 
       if (!name) {
+        this.currentChord = null;
         this.chordReadout.textContent = '—';
         this.chordReadout.classList.add('dim');
         this.chordReadout.classList.remove('pulse');
@@ -77,9 +80,11 @@ export class Renderer {
         this.chordReadout.style.removeProperty('border-color');
       } else {
         const conf = Math.round(confidence * 100);
-        this.chordReadout.textContent = `${name}  ·  ${conf}%`;
+        this.currentChord = { name, confidence };
+        const display = this.formatChordName(name);
+        this.chordReadout.textContent = `${display}  ·  ${conf}%`;
 
-        const { fg, bg } = this.getChordColors(name);
+        const { fg, bg } = this.getChordColors(display);
         const greenThresh = Math.round(this.chordDetector.confEnter * 100);
         this.chordReadout.style.color = conf >= greenThresh ? fg : '';
         this.chordReadout.style.background = bg;
@@ -94,7 +99,7 @@ export class Renderer {
   }
 
   getChordColors(name) {
-    const quality = name.replace(/^[A-G]#?/, '');
+    const quality = name.replace(/^[A-G](?:#|b)?/, '');
     if (quality.includes('dim')) return { fg: '#f87171', bg: 'rgba(248,113,113,0.15)' };
     if (quality.includes('aug')) return { fg: '#fbbf24', bg: 'rgba(251,191,36,0.15)' };
     if (quality.startsWith('m') && !quality.startsWith('maj')) return { fg: '#60a5fa', bg: 'rgba(96,165,250,0.15)' };
@@ -103,6 +108,27 @@ export class Renderer {
     if (quality.includes('7') || quality.includes('9')) return { fg: '#fbbf24', bg: 'rgba(251,191,36,0.15)' };
     if (quality.includes('5')) return { fg: '#a1a1aa', bg: 'rgba(161,161,170,0.15)' };
     return { fg: '#4ade80', bg: 'rgba(74,222,128,0.15)' }; // major/default
+  }
+
+  formatChordName(name) {
+    if (!this.preferFlats) return name;
+    const map = { 'C#': 'Db', 'D#': 'Eb', 'F#': 'Gb', 'G#': 'Ab', 'A#': 'Bb' };
+    return name.replace(/C#|D#|F#|G#|A#/g, (m) => map[m]);
+  }
+
+  toggleAccidentals() {
+    this.preferFlats = !this.preferFlats;
+    localStorage.setItem('preferFlats', this.preferFlats);
+    if (this.currentChord && this.currentChord.name && this.chordReadout) {
+      const conf = Math.round(this.currentChord.confidence * 100);
+      const display = this.formatChordName(this.currentChord.name);
+      const { fg, bg } = this.getChordColors(display);
+      const greenThresh = Math.round(this.chordDetector.confEnter * 100);
+      this.chordReadout.textContent = `${display}  ·  ${conf}%`;
+      this.chordReadout.style.color = conf >= greenThresh ? fg : '';
+      this.chordReadout.style.background = bg;
+      this.chordReadout.style.borderColor = fg;
+    }
   }
 
   // Start detector only when audio context is running and audio is flowing
@@ -148,6 +174,11 @@ export class Renderer {
       this.chordMode = savedMode;
     }
 
+    const flats = localStorage.getItem('preferFlats');
+    if (flats === 'true') {
+      this.preferFlats = true;
+    }
+
     // Ensure UI reflects the restored settings
     this.updateChordToggleUi();
   }
@@ -179,6 +210,12 @@ export class Renderer {
       this.toggleChordsBtn.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         this.cycleChordMode();
+      });
+    }
+    if (this.chordReadout) {
+      this.chordReadout.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        this.toggleAccidentals();
       });
     }
     this.darkModeToggle.addEventListener('click', () => this.toggleDarkMode());

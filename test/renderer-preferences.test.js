@@ -84,11 +84,13 @@ describe('Renderer preferences', () => {
     localStorage.setItem('darkMode', 'true');
     localStorage.setItem('chordsEnabled', 'false');
     localStorage.setItem('chordMode', 'accurate');
+    localStorage.setItem('preferFlats', 'true');
     const r = new Renderer();
     expect(r.volumeSlider.value).toBe('0.4');
     expect(document.body.classList.contains('dark-mode')).toBe(true);
     expect(r.chordsEnabled).toBe(false);
     expect(r.chordMode).toBe('accurate');
+    expect(r.preferFlats).toBe(true);
   });
 
   it('persists changes to preferences', () => {
@@ -107,5 +109,8 @@ describe('Renderer preferences', () => {
 
     r.cycleChordMode();
     expect(localStorage.getItem('chordMode')).toBe(r.chordMode);
+
+    r.chordReadout.dispatchEvent(new MouseEvent('contextmenu'));
+    expect(localStorage.getItem('preferFlats')).toBe('true');
   });
 });
