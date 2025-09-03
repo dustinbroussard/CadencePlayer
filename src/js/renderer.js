@@ -18,7 +18,8 @@ export class Renderer {
       requiredStableFrames: 2,
       harmonicThreshold: 0.15,
       noiseFloorAlpha: 0.06,
-      chromaAlpha: 0.30,
+      chromaAlphaFast: 0.4,
+      chromaAlphaSlow: 0.15,
       // Provide RMS data for gating
       getRms: () => this.audioManager.getCurrentRms(),
       rmsGate: 0.01,
@@ -100,7 +101,8 @@ export class Renderer {
     if (quality.startsWith('m') && !quality.startsWith('maj')) return { fg: '#60a5fa', bg: 'rgba(96,165,250,0.15)' };
     if (quality.includes('sus')) return { fg: '#c084fc', bg: 'rgba(192,132,252,0.15)' };
     if (quality.includes('6')) return { fg: '#34d399', bg: 'rgba(52,211,153,0.15)' };
-    if (quality.includes('7') || quality.includes('9')) return { fg: '#fbbf24', bg: 'rgba(251,191,36,0.15)' };
+    if (quality.includes('7') || quality.includes('9') || quality.includes('11') || quality.includes('13'))
+      return { fg: '#fbbf24', bg: 'rgba(251,191,36,0.15)' };
     if (quality.includes('5')) return { fg: '#a1a1aa', bg: 'rgba(161,161,170,0.15)' };
     return { fg: '#4ade80', bg: 'rgba(74,222,128,0.15)' }; // major/default
   }

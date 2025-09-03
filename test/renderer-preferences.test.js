@@ -108,4 +108,10 @@ describe('Renderer preferences', () => {
     r.cycleChordMode();
     expect(localStorage.getItem('chordMode')).toBe(r.chordMode);
   });
+
+  it('returns expected colors for extended chords', () => {
+    const r = new Renderer();
+    const col = r.getChordColors('C13');
+    expect(col.fg).toBe('#fbbf24');
+  });
 });

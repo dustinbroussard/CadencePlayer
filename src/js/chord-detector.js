@@ -620,19 +620,36 @@ export class ChordDetector {
     const extensions = this._analyzeExtensions(chroma, root, quality);
     
     if (extensions.maj7 > extensions.dom7 && extensions.maj7 > 0.4) {
-      return { ...detection, quality: quality.startsWith('m') ? 'mMaj7' : 'Maj7' };
+      let newQuality = quality.startsWith('m') ? 'mMaj7' : 'Maj7';
+
+      if (extensions.ninth > 0.35) {
+        newQuality = quality.startsWith('m') ? 'mMaj9' : 'Maj9';
+        if (extensions.eleventh > 0.3) {
+          newQuality = quality.startsWith('m') ? 'mMaj11' : 'Maj11';
+        }
+      }
+
+      if (extensions.thirteenth > 0.35) {
+        newQuality = quality.startsWith('m') ? 'mMaj13' : 'Maj13';
+      }
+
+      return { ...detection, quality: newQuality };
     }
-    
+
     if (extensions.dom7 > 0.4) {
       let newQuality = quality.startsWith('m') ? 'm7' : '7';
-      
+
       if (extensions.ninth > 0.35) {
         newQuality = quality.startsWith('m') ? 'm9' : '9';
         if (extensions.eleventh > 0.3) {
           newQuality = quality.startsWith('m') ? 'm11' : '11';
         }
       }
-      
+
+      if (extensions.thirteenth > 0.35) {
+        newQuality = quality.startsWith('m') ? 'm13' : '13';
+      }
+
       return { ...detection, quality: newQuality };
     }
     
@@ -697,16 +714,18 @@ export class ChordDetector {
       tones.push((root + 6) % 12); // Diminished fifth
     }
     
-    if (quality.includes('7')) {
+    const hasExtended = ['7','9','11','13'].some(ext => quality.includes(ext));
+
+    if (hasExtended && !quality.includes('Maj')) {
       tones.push((root + 10) % 12); // Minor seventh
     }
-    
-    if (quality.includes('Maj7')) {
+
+    if (hasExtended && quality.includes('Maj')) {
       tones.push((root + 11) % 12); // Major seventh
     }
-    
-    if (quality.includes('6')) {
-      tones.push((root + 9) % 12); // Sixth
+
+    if (quality.includes('6') || quality.includes('13')) {
+      tones.push((root + 9) % 12); // Sixth / Thirteenth
     }
     
     return tones;
