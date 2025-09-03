@@ -6,6 +6,8 @@ export class Visualizer {
     this.dataArray = new Uint8Array(this.analyser.frequencyBinCount);
     this.hue = 0;
     this.particles = [];
+    this.fpsCap = 60;
+    this._lastDraw = 0;
     this.resizeCanvas();
     window.addEventListener('resize', () => this.resizeCanvas());
   }
@@ -21,6 +23,10 @@ export class Visualizer {
 
   draw() {
     if (!this.analyser) return;
+    const now = performance.now();
+    const minDt = 1000 / Math.max(1, this.fpsCap);
+    if (this._lastDraw && (now - this._lastDraw) < minDt) return;
+    this._lastDraw = now;
 
     this.analyser.getByteFrequencyData(this.dataArray);
     
@@ -62,7 +68,7 @@ export class Visualizer {
   }
 
   drawFrequencyBars(centerX, centerY, baseRadius) {
-    const barCount = 100;
+    const barCount = Math.min(100, Math.round(this.canvas.width / 10));
     const angleStep = (Math.PI * 2) / barCount;
     const dataSize = this.dataArray.length;
     

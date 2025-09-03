@@ -1,6 +1,7 @@
 const { app, BrowserWindow, Menu, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 
 // Enable live reload for development
 if (process.env.NODE_ENV === 'development') {
@@ -39,6 +40,10 @@ function createWindow() {
     mainWindow.show();
   });
 
+  // Harden navigation: deny window.open and external navigation
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (e) => e.preventDefault());
+
   if (process.env.NODE_ENV === 'development') {
     mainWindow.webContents.openDevTools();
   }
@@ -57,7 +62,8 @@ ipcMain.handle('select-audio-files', async () => {
   } else {
     return result.filePaths.map(filePath => {
       const fileName = path.basename(filePath);
-      return { path: filePath, name: fileName };
+      const url = pathToFileURL(filePath).href;
+      return { path: filePath, name: fileName, url };
     });
   }
 });

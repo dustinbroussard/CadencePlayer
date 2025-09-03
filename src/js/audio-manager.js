@@ -85,6 +85,18 @@ export class AudioManager {
     return this.chordAnalyser;
   }
 
+  setChordFftSize(size) {
+    try {
+      // Clamp to valid AnalyserNode fft sizes
+      const valid = [32,64,128,256,512,1024,2048,4096,8192,16384,32768];
+      const nearest = valid.reduce((a,b)=> Math.abs(b-size) < Math.abs(a-size) ? b : a, valid[0]);
+      this.chordAnalyser.fftSize = nearest;
+      return this.chordAnalyser.fftSize;
+    } catch {
+      return this.chordAnalyser.fftSize;
+    }
+  }
+
   connectNodes() {
     // Build EQ chain (filters in series) → destination
     if (this.filters.length > 1) {
@@ -143,25 +155,32 @@ export class AudioManager {
 
   async addFilesToQueue(files) {
     for (const file of files) {
-      // Create a blob URL to load the file
-      const blob = await fetch(`file://${file.path}`).then(r => r.blob());
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      
-      // Get duration before adding to queue
-      await new Promise(resolve => {
-        audio.onloadedmetadata = () => {
-          this.queue.push({
-            path: file.path,
-            name: file.name,
-            url: url,
-            audio: audio,
-            duration: audio.duration,
-            source: null
-          });
-          resolve();
-        };
-      });
+      try {
+        const audio = new Audio();
+        // Prefer secure file URL provided by main process
+        const url = file.url || `file://${file.path}`;
+        audio.src = url;
+
+        // Get duration before adding to queue
+        await new Promise((resolve, reject) => {
+          audio.onloadedmetadata = () => {
+            this.queue.push({
+              path: file.path,
+              name: file.name,
+              url: url,
+              audio: audio,
+              duration: audio.duration,
+              source: null
+            });
+            resolve();
+          };
+          audio.onerror = () => reject(new Error(`Failed to load audio: ${file.name}`));
+        });
+      } catch (err) {
+        console.error(err);
+        // Skip file on error and continue
+        continue;
+      }
     }
     this.emit('queue-updated');
     if (this.queue.length === files.length) {
@@ -170,8 +189,20 @@ export class AudioManager {
   }
 
   clearQueue() {
-    // Disconnect any existing track sources
-    this.queue.forEach(t => t.source && t.source.disconnect());
+    // Disconnect and stop any existing track sources and media
+    this.queue.forEach(t => {
+      try {
+        if (t.audio) {
+          t.audio.pause();
+          // Clear src to release resources
+          t.audio.src = '';
+        }
+      } catch {}
+      try {
+        if (t.source) t.source.disconnect();
+      } catch {}
+      t.source = null;
+    });
     this.queue = [];
     this.currentIndex = -1;
     this.isPlaying = false;
@@ -256,9 +287,8 @@ export class AudioManager {
   }
 
   setVolume(value) {
-    if (this.source) {
-      this.source.mediaElement.volume = value;
-    }
+    const v = Math.max(0, Math.min(1, parseFloat(value)));
+    if (this.masterGain) this.masterGain.gain.value = v;
   }
   
   seek(progress) {

@@ -31,6 +31,9 @@ export class ChordDetector {
     this.noiseFloorAlpha = opts.noiseFloorAlpha ?? 0.05;
     this.noiseFloor = 0;
     this.dynamicGate = 0.04; // Adaptive activity gate
+    this.disableEnergyGate = opts.disableEnergyGate ?? false;
+    // Allow spectral clarity gate to be tuned/disabled (useful for tests)
+    this.minSpectralClarity = opts.minSpectralClarity ?? ((opts.getRms ?? null) ? 0.3 : 0.0);
     
     // Superior smoothing with multiple time constants
     this.chromaAlphaFast = opts.chromaAlphaFast ?? 0.4;  // Quick response
@@ -81,6 +84,8 @@ export class ChordDetector {
     this.harmonicStrength = 0;
     this.bassStrength = 0;
     this._started = false;
+    this.maxFps = opts.maxFps ?? 60;
+    this._lastTick = 0;
     
     this.onChord = () => {};
   }
@@ -90,12 +95,33 @@ export class ChordDetector {
   start() {
     if (this._started) return;
     this._started = true;
-    const tick = () => { this.update(); requestAnimationFrame(tick); };
-    requestAnimationFrame(tick);
+    const loop = () => {
+      const now = performance.now();
+      const frameInterval = 1000 / Math.max(1, this.maxFps);
+      if (!this._lastTick || (now - this._lastTick) >= frameInterval) {
+        this._lastTick = now;
+        this.update();
+      }
+      if (this._started) this._rafId = requestAnimationFrame(loop);
+    };
+    this._rafId = requestAnimationFrame(loop);
+  }
+
+  stop() {
+    if (!this._started) return;
+    this._started = false;
+    if (this._rafId) cancelAnimationFrame(this._rafId);
+    this._rafId = null;
   }
 
   update() {
     if (!this.analyser) return;
+
+    // Adapt internal buffers if external analyser FFT size changes
+    if (this.analyser.fftSize && this.analyser.fftSize !== this.fftSize) {
+      this.fftSize = this.analyser.fftSize;
+      this.fftBins = new Float32Array(this.fftSize / 2);
+    }
 
     // Enhanced RMS gating with spectral analysis
     if (this.getRms) {
@@ -125,7 +151,9 @@ export class ChordDetector {
     const totalEnergy = chroma.reduce((s, v) => s + v, 0);
     this._updateAdaptiveGate(totalEnergy);
     
-    if (totalEnergy < this.dynamicGate || this.spectralClarity < 0.3) {
+    const failEnergy = !this.disableEnergyGate && (totalEnergy < this.dynamicGate);
+    const failClarity = (this.minSpectralClarity > 0) && (this.spectralClarity < this.minSpectralClarity);
+    if (failEnergy || failClarity) {
       this._handleSilence();
       this._resetDiagnostics();
       return;
