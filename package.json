@@ -7,7 +7,10 @@
     "start": "electron .",
     "dev": "NODE_ENV=development electron .",
     "dist": "electron-builder",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "eslint . --ext .js",
+    "lint:fix": "eslint . --ext .js --fix",
+    "format": "prettier -w ."
   },
   "keywords": [
     "electron",
@@ -18,11 +21,21 @@
   ],
   "author": "Code Maniac",
   "license": "MIT",
+  "dependencies": {
+    "music-metadata": "^10.9.1",
+    "node-id3": "^0.2.9"
+  },
   "devDependencies": {
+    "@eslint/js": "^9.35.0",
     "electron": "^30.0.0",
     "electron-builder": "^24.13.3",
     "electron-reload": "^2.0.0-alpha.1",
+    "eslint": "^9.35.0",
+    "eslint-config-prettier": "^9.1.2",
+    "eslint-plugin-import": "^2.32.0",
+    "globals": "^15.15.0",
     "jsdom": "^26.1.0",
+    "prettier": "^3.6.2",
     "vitest": "^3.2.4"
   },
   "build": {

@@ -88,6 +88,15 @@ export class ChordDetector {
     this._lastTick = 0;
     
     this.onChord = () => {};
+
+    // Tuning and chroma mapping (improves pitch-class accuracy)
+    this.tuningHz = opts.tuningHz ?? 440;
+    this.tuningCents = 0; // relative to 440Hz
+    this._lastTuningCheck = 0;
+    this.tuningCheckMs = opts.tuningCheckMs ?? 1500;
+    this.chromaMap = null; // Float32Array of length (bins*12)
+    this.chromaMapLen = 0;
+    this.chromaSigmaCents = opts.chromaSigmaCents ?? 35; // gaussian width for bin→PC weights
   }
 
   setOnChord(cb) { this.onChord = cb; }
@@ -121,6 +130,8 @@ export class ChordDetector {
     if (this.analyser.fftSize && this.analyser.fftSize !== this.fftSize) {
       this.fftSize = this.analyser.fftSize;
       this.fftBins = new Float32Array(this.fftSize / 2);
+      // Rebuild chroma map for new resolution
+      this._rebuildChromaMap();
     }
 
     // Enhanced RMS gating with spectral analysis
@@ -138,7 +149,15 @@ export class ChordDetector {
 
     this.analyser.getFloatFrequencyData(this.fftBins);
     
-    // Compute spectral features for better analysis
+    // Periodically estimate tuning and rebuild chroma map if needed
+    const nowTs = performance.now();
+    if (nowTs - this._lastTuningCheck > this.tuningCheckMs) {
+      const changed = this._estimateTuning();
+      if (changed) this._rebuildChromaMap();
+      this._lastTuningCheck = nowTs;
+    }
+
+    // Compute spectral features for better analysis (includes flatness)
     this._computeSpectralFeatures();
     
     const chroma = this._computeEnhancedChroma();
@@ -152,8 +171,10 @@ export class ChordDetector {
     this._updateAdaptiveGate(totalEnergy);
     
     const failEnergy = !this.disableEnergyGate && (totalEnergy < this.dynamicGate);
+    // Additional gate for noise-like spectra when RMS available
+    const isNoisy = (this.getRms != null) && (this.spectralFlatness || 0) > 0.8;
     const failClarity = (this.minSpectralClarity > 0) && (this.spectralClarity < this.minSpectralClarity);
-    if (failEnergy || failClarity) {
+    if (failEnergy || failClarity || isNoisy) {
       this._handleSilence();
       this._resetDiagnostics();
       return;
@@ -223,7 +244,8 @@ export class ChordDetector {
       harmonicStrength: this.harmonicStrength,
       bassStrength: this.bassStrength,
       adaptiveThreshold: this.adaptiveThreshold,
-      dynamicGate: this.dynamicGate
+      dynamicGate: this.dynamicGate,
+      tuningCents: this.tuningCents
     };
   }
 
@@ -232,108 +254,157 @@ export class ChordDetector {
     const len = this.fftBins.length;
     const binHz = this.sampleRate / (2 * len);
     
+    // For spectral flatness
+    let gmLogSum = 0; // log for geometric mean
+    let count = 0;
+
     for (let i = 1; i < len; i++) {
-      const mag = Math.pow(10, this.fftBins[i] / 20);
+      const mag = Math.max(1e-8, Math.pow(10, this.fftBins[i] / 20));
       const freq = i * binHz;
       
       if (freq >= this.minFreq && freq <= this.maxFreq) {
         sumMag += mag;
         sumFreqWeighted += mag * freq;
         sumFreqSq += mag * freq * freq;
+        gmLogSum += Math.log(mag);
+        count++;
       }
     }
     
     if (sumMag > 0) {
       this.spectralCentroid = sumFreqWeighted / sumMag;
-      this.spectralSpread = Math.sqrt(sumFreqSq / sumMag - this.spectralCentroid * this.spectralCentroid);
+      this.spectralSpread = Math.sqrt(Math.max(0, sumFreqSq / sumMag - this.spectralCentroid * this.spectralCentroid));
       this.spectralClarity = Math.min(1, sumMag / (this.spectralSpread + 100));
+    }
+
+    if (count > 0) {
+      const geoMean = Math.exp(gmLogSum / count);
+      const arithMean = sumMag / count;
+      this.spectralFlatness = Math.min(1, Math.max(0, geoMean / Math.max(1e-8, arithMean)));
+    } else {
+      this.spectralFlatness = 0;
     }
   }
 
   _computeEnhancedChroma() {
     this.pitchClassEnergy.fill(0);
-    const harmonicEnergy = new Float32Array(12);
     const len = this.fftBins.length;
-    const binHz = this.sampleRate / (2 * len);
-
-    // Multi-pass analysis: fundamental + harmonics
-    for (let pass = 0; pass < (this.enableHarmonicAnalysis ? 3 : 1); pass++) {
-      for (let i = 1; i < len; i++) {
-        let mag = Math.pow(10, this.fftBins[i] / 20);
-        if (mag <= 0) continue;
-
-        const f = i * binHz;
-        if (f < this.minFreq || f > this.maxFreq) continue;
-
-        // Harmonic analysis passes
-        let weight = 1;
-        if (pass === 1) {
-          // Second harmonic pass - look for fundamentals
-          const fundamental = f / 2;
-          if (fundamental >= this.minFreq) {
-            weight = this.harmonicWeights[1] || 0.8;
-          } else continue;
-        } else if (pass === 2) {
-          // Third harmonic pass
-          const fundamental = f / 3;
-          if (fundamental >= this.minFreq) {
-            weight = this.harmonicWeights[2] || 0.6;
-          } else continue;
-        }
-
-        const analysisFreq = pass === 0 ? f : f / (pass + 1);
-        const midi = 69 + 12 * Math.log2(analysisFreq / 440);
-        const pc = ((Math.round(midi) % 12) + 12) % 12;
-
-        // Enhanced frequency weighting
-        const freqWeight = this._getFrequencyWeight(analysisFreq);
-        const finalWeight = weight * freqWeight;
-        
-        if (pass === 0) {
-          this.pitchClassEnergy[pc] += mag * finalWeight;
-        } else {
-          harmonicEnergy[pc] += mag * finalWeight;
-        }
-      }
+    if (!this.chromaMap || this.chromaMapLen !== len) {
+      this._rebuildChromaMap();
     }
 
-    // Combine fundamental and harmonic information
-    for (let i = 0; i < 12; i++) {
-      this.pitchClassEnergy[i] += harmonicEnergy[i] * 0.6;
+    // Aggregate energy into pitch classes using precomputed weights
+    for (let i = 1; i < len; i++) {
+      const mag = Math.max(0, Math.pow(10, this.fftBins[i] / 20));
+      if (mag <= 0) continue;
+      const base = i * 12;
+      // Manual unroll for 12 classes for speed
+      this.pitchClassEnergy[0]  += mag * this.chromaMap[base + 0];
+      this.pitchClassEnergy[1]  += mag * this.chromaMap[base + 1];
+      this.pitchClassEnergy[2]  += mag * this.chromaMap[base + 2];
+      this.pitchClassEnergy[3]  += mag * this.chromaMap[base + 3];
+      this.pitchClassEnergy[4]  += mag * this.chromaMap[base + 4];
+      this.pitchClassEnergy[5]  += mag * this.chromaMap[base + 5];
+      this.pitchClassEnergy[6]  += mag * this.chromaMap[base + 6];
+      this.pitchClassEnergy[7]  += mag * this.chromaMap[base + 7];
+      this.pitchClassEnergy[8]  += mag * this.chromaMap[base + 8];
+      this.pitchClassEnergy[9]  += mag * this.chromaMap[base + 9];
+      this.pitchClassEnergy[10] += mag * this.chromaMap[base + 10];
+      this.pitchClassEnergy[11] += mag * this.chromaMap[base + 11];
     }
 
     const maxVal = Math.max(...this.pitchClassEnergy);
     if (maxVal === 0) return null;
 
-    // Enhanced normalization with better dynamics
     const normed = new Float32Array(12);
     for (let i = 0; i < 12; i++) {
-      normed[i] = Math.pow(this.pitchClassEnergy[i] / maxVal, 0.8); // Slight compression
+      normed[i] = Math.pow(this.pitchClassEnergy[i] / maxVal, 0.8);
     }
 
-    // Dual-rate EMA smoothing
     for (let i = 0; i < 12; i++) {
-      this.chromaEma[i] = (1 - this.chromaAlphaFast) * this.chromaEma[i] + 
-                          this.chromaAlphaFast * normed[i];
-      this.chromaEmaSlow[i] = (1 - this.chromaAlphaSlow) * this.chromaEmaSlow[i] + 
-                              this.chromaAlphaSlow * normed[i];
+      this.chromaEma[i] = (1 - this.chromaAlphaFast) * this.chromaEma[i] + this.chromaAlphaFast * normed[i];
+      this.chromaEmaSlow[i] = (1 - this.chromaAlphaSlow) * this.chromaEmaSlow[i] + this.chromaAlphaSlow * normed[i];
     }
 
-    // Combine fast and slow smoothing based on signal stability
     const stability = this._measureSignalStability();
-    const alpha = stability > 0.7 ? 0.3 : 0.7; // More fast response for stable signals
-    
+    const alpha = stability > 0.7 ? 0.3 : 0.7;
     const out = new Float32Array(12);
     for (let i = 0; i < 12; i++) {
-      const combined = alpha * this.chromaEma[i] + (1 - alpha) * this.chromaEmaSlow[i];
-      out[i] = combined;
+      out[i] = alpha * this.chromaEma[i] + (1 - alpha) * this.chromaEmaSlow[i];
     }
 
-    // Store in history for consensus analysis
     this.chromaHistory[this.historyIndex] = new Float32Array(out);
     this.historyIndex = (this.historyIndex + 1) % this.chromaHistory.length;
-
     return out;
+  }
+
+  _rebuildChromaMap() {
+    const len = this.fftBins.length;
+    const binHz = this.sampleRate / (2 * len);
+    const sigma = this.chromaSigmaCents;
+    const weights = new Float32Array(len * 12);
+    for (let i = 0; i < len; i++) {
+      const f = i * binHz;
+      if (f < this.minFreq || f > this.maxFreq || f <= 0) {
+        // leave zeros
+        continue;
+      }
+      const midi = 69 + 12 * Math.log2(f / this.tuningHz);
+      const pcFloat = ((midi % 12) + 12) % 12; // 0..12
+      let norm = 0;
+      for (let pc = 0; pc < 12; pc++) {
+        // distance in semitones wrapped to [-6,6]
+        let d = pcFloat - pc;
+        if (d > 6) d -= 12;
+        if (d < -6) d += 12;
+        const cents = d * 100;
+        const w = Math.exp(-(cents * cents) / (2 * sigma * sigma));
+        weights[i * 12 + pc] = w;
+        norm += w;
+      }
+      if (norm > 0) {
+        for (let pc = 0; pc < 12; pc++) {
+          weights[i * 12 + pc] /= norm;
+          // Apply gentle frequency weighting
+          weights[i * 12 + pc] *= this._getFrequencyWeight(f);
+        }
+      }
+    }
+    this.chromaMap = weights;
+    this.chromaMapLen = len;
+  }
+
+  _estimateTuning() {
+    // Estimate tuning deviation in cents using spectral peaks
+    const len = this.fftBins.length;
+    const binHz = this.sampleRate / (2 * len);
+    const centsResiduals = [];
+    for (let i = 2; i < len - 2; i++) {
+      const f = i * binHz;
+      if (f < 100 || f > 2000) continue;
+      const mag = this.fftBins[i];
+      // simple local peak check in dB
+      if (mag > this.fftBins[i - 1] && mag > this.fftBins[i + 1] && mag > -50) {
+        const midi = 69 + 12 * Math.log2(f / this.tuningHz);
+        const nearest = Math.round(midi);
+        const residual = (midi - nearest) * 100; // cents
+        // keep in [-50, 50]
+        const wrapped = residual > 50 ? residual - 100 : (residual < -50 ? residual + 100 : residual);
+        centsResiduals.push(wrapped);
+      }
+    }
+    if (centsResiduals.length < 5) return false;
+    centsResiduals.sort((a, b) => a - b);
+    const mid = Math.floor(centsResiduals.length / 2);
+    const median = centsResiduals.length % 2 ? centsResiduals[mid] : (centsResiduals[mid - 1] + centsResiduals[mid]) / 2;
+    const clamped = Math.max(-20, Math.min(20, median));
+    if (Math.abs(clamped) < 1) return false; // ignore tiny drift
+    const factor = Math.pow(2, clamped / 1200);
+    // smooth update
+    const newTuning = this.tuningHz * factor;
+    this.tuningHz = this.tuningHz * 0.7 + newTuning * 0.3;
+    this.tuningCents = this.tuningCents * 0.7 + clamped * 0.3;
+    return true;
   }
 
   _getFrequencyWeight(freq) {
@@ -475,7 +546,7 @@ export class ChordDetector {
     let bestEntry = null;
     let bestScore = 0;
     
-    for (const [key, entry] of chordCounts.entries()) {
+    for (const [, entry] of chordCounts.entries()) {
       const avgConf = entry.totalConf / entry.count;
       const consistencyScore = entry.count * avgConf;
       

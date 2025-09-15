@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
 import { AudioManager } from '../src/js/audio-manager.js';
 
 describe('AudioManager', () => {
@@ -73,4 +74,3 @@ describe('AudioManager', () => {
     expect(createMediaElementSource).toHaveBeenCalledTimes(1);
   });
 });
-

@@ -3,8 +3,8 @@
  * -------------------------------------------------------------------------------- */
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
 :root {
-  --bg-color: #0c0c0c;
-  --bg-gradient: linear-gradient(135deg, #0c0c0c 0%, #1a1a2e 50%, #16213e 100%);
+  --bg-color: #000000;
+  --bg-gradient: linear-gradient(135deg, #00000 0%, #373738 50%, #373738 100%);
   --sidebar-bg: rgba(17, 17, 17, 0.5);
   --header-bg: rgba(17, 17, 17, 0.9);
   --text-color: #f0f0f0;
@@ -40,18 +40,19 @@ body {
 }
 
 body.dark-mode {
-  --bg-color: #f0f0f0;
-  --bg-gradient: linear-gradient(135deg, #e0e0e0 0%, #f0f0f0 50%, #ffffff 100%);
-  --sidebar-bg: rgba(240, 240, 240, 0.8);
-  --header-bg: rgba(255, 255, 255, 0.9);
-  --text-color: #333;
-  --text-secondary: #666;
+  /* Softer, warmer light palette */
+  --bg-color: #efefef;
+  --bg-gradient: linear-gradient(135deg, #e9e9e9 0%, #f2f2f2 50%, #f8f8f8 100%);
+  --sidebar-bg: rgba(245, 245, 245, 0.85);
+  --header-bg: rgba(250, 250, 250, 0.9);
+  --text-color: #2f2f2f;
+  --text-secondary: #686868;
   --accent-color: #4CAF50;
-  --btn-bg: rgba(220, 220, 220, 0.7);
-  --btn-hover-bg: rgba(200, 200, 200, 0.8);
-  --border-color: rgba(0, 0, 0, 0.1);
-  --playing-bg: rgba(76, 175, 80, 0.1);
-  --playing-border: rgba(76, 175, 80, 0.5);
+  --btn-bg: rgba(0, 0, 0, 0.06);
+  --btn-hover-bg: rgba(0, 0, 0, 0.1);
+  --border-color: rgba(0, 0, 0, 0.12);
+  --playing-bg: rgba(76, 175, 80, 0.08);
+  --playing-border: rgba(76, 175, 80, 0.45);
 }
 
 body.drag-over .app-container {
@@ -597,3 +598,62 @@ body.drag-over .app-container {
     justify-content: center;
   }
 }
+
+/* --------------------------------------------------------------------------------
+ * Context Menu
+ * -------------------------------------------------------------------------------- */
+.context-menu {
+  position: fixed;
+  min-width: 180px;
+  background: var(--sidebar-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  z-index: 9999;
+  backdrop-filter: blur(10px);
+}
+.context-item {
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.context-item:hover {
+  background: var(--btn-hover-bg);
+}
+.context-item.destructive { color: #ff6b6b; }
+.context-item.destructive:hover { background: rgba(231, 76, 60, 0.2); }
+.context-separator { height: 1px; background: var(--border-color); margin: 4px 0; }
+
+/* --------------------------------------------------------------------------------
+ * Modal (Metadata Editor)
+ * -------------------------------------------------------------------------------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+.modal {
+  width: 460px;
+  max-width: 90vw;
+  background: var(--sidebar-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  padding: 16px 18px;
+}
+.modal h3 { margin-bottom: 10px; }
+.form-row { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.form-row.two-col { flex-direction: row; gap: 16px; }
+.form-row.two-col > div { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+.modal label { font-size: 12px; color: var(--text-secondary); }
+.modal input[type="text"] {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  background: rgba(255,255,255,0.06);
+  color: var(--text-color);
+}
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }

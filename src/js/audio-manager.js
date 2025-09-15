@@ -170,12 +170,27 @@ export class AudioManager {
               url: url,
               audio: audio,
               duration: audio.duration,
-              source: null
+              source: null,
+              meta: null
             });
             resolve();
           };
           audio.onerror = () => reject(new Error(`Failed to load audio: ${file.name}`));
         });
+        // Best-effort: read metadata in background; when it returns, refresh UI
+        try {
+          const res = await window.electronAPI.readMetadata(file.path);
+          if (res?.success) {
+            const t = this.queue[this.queue.length - 1];
+            if (t && t.path === file.path) {
+              t.meta = res.tags || {};
+              this.emit('queue-updated');
+              if (this.currentIndex === this.queue.length - 1) {
+                this.emit('track-loaded', t);
+              }
+            }
+          }
+        } catch { /* ignore */ }
       } catch (err) {
         console.error(err);
         // Skip file on error and continue
@@ -183,9 +198,24 @@ export class AudioManager {
       }
     }
     this.emit('queue-updated');
-    if (this.queue.length === files.length) {
-      this.playTrack(0);
+    // Autostart if nothing was playing and we now have tracks
+    if (this.currentIndex === -1 && this.queue.length > 0) this.playTrack(0);
+  }
+
+  // Move a track to play next (right after current index)
+  moveTrackToNext(index) {
+    if (index < 0 || index >= this.queue.length) return;
+    if (this.currentIndex < 0 || this.currentIndex >= this.queue.length) return;
+    if (index === this.currentIndex || index === this.currentIndex + 1) return; // already next
+    const [item] = this.queue.splice(index, 1);
+    let target = this.currentIndex + 1;
+    if (index < this.currentIndex) {
+      // After removing earlier item, currentIndex shifts left by 1
+      this.currentIndex -= 1;
+      target = this.currentIndex + 1;
     }
+    this.queue.splice(target, 0, item);
+    this.emit('queue-updated');
   }
 
   clearQueue() {
@@ -197,10 +227,10 @@ export class AudioManager {
           // Clear src to release resources
           t.audio.src = '';
         }
-      } catch {}
+      } catch (e) { void e; /* best-effort cleanup */ }
       try {
         if (t.source) t.source.disconnect();
-      } catch {}
+      } catch (e) { void e; /* best-effort cleanup */ }
       t.source = null;
     });
     this.queue = [];
@@ -213,6 +243,76 @@ export class AudioManager {
     }
     this.emit('track-loaded', null);
     this.emit('queue-updated');
+  }
+
+  /**
+   * Remove a single track from the queue by index.
+    * - Cleans up its media element and node connections
+    * - Adjusts currentIndex appropriately and continues playback if applicable
+    */
+  removeTrackAt(index) {
+    if (index < 0 || index >= this.queue.length) return;
+
+    const wasPlaying = this.isPlaying;
+    const removingCurrent = index === this.currentIndex;
+
+    // Cleanup the track being removed
+    const track = this.queue[index];
+    try {
+      if (track?.audio) {
+        track.audio.pause();
+        track.audio.src = '';
+      }
+    } catch (e) { void e; }
+    try {
+      if (track?.source) track.source.disconnect();
+    } catch (e) { void e; }
+
+    // If removing an item before current, shift current index back by one
+    if (index < this.currentIndex) {
+      this.currentIndex -= 1;
+    }
+
+    // If removing the currently playing item, clear current source first
+    if (removingCurrent && this.source) {
+      try { this.source.mediaElement.pause(); } catch { /* no-op */ }
+      this.source = null;
+      this.isPlaying = false;
+    }
+
+    // Remove from queue
+    this.queue.splice(index, 1);
+
+    // Determine next state
+    if (this.queue.length === 0) {
+      // Nothing left
+      this.currentIndex = -1;
+      this.emit('track-loaded', null);
+      this.emit('queue-updated');
+      return;
+    }
+
+    if (removingCurrent) {
+      // Prefer to play the next item at the same index (which now points to the next track)
+      const nextIndex = Math.min(index, this.queue.length - 1);
+      this.currentIndex = nextIndex;
+      if (wasPlaying) {
+        this.playTrack(nextIndex);
+      } else {
+        // Not playing: just set up trackLoaded event for UI without autoplay
+        const t = this.queue[nextIndex];
+        if (t && !t.source) {
+          t.source = this.ctx.createMediaElementSource(t.audio);
+          t.source.connect(this.masterGain);
+        }
+        this.source = t?.source || null;
+        this.emit('track-loaded', t || null);
+        this.emit('queue-updated');
+      }
+    } else {
+      // Removed some other item: just refresh UI
+      this.emit('queue-updated');
+    }
   }
 
   play() {
@@ -311,5 +411,16 @@ export class AudioManager {
   toggleRepeat() {
     this.isRepeating = !this.isRepeating;
     this.isShuffled = false;
+  }
+
+  // Explicit setters for preference restoration
+  setShuffle(enabled) {
+    this.isShuffled = !!enabled;
+    if (this.isShuffled) this.isRepeating = false;
+  }
+
+  setRepeat(enabled) {
+    this.isRepeating = !!enabled;
+    if (this.isRepeating) this.isShuffled = false;
   }
 }

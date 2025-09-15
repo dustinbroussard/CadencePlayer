@@ -18,13 +18,13 @@
       <span>Cadence Player</span>
     </div>
     <div class="titlebar-controls">
-      <button id="minimize-btn" class="titlebar-btn">
+      <button id="minimize-btn" class="titlebar-btn" aria-label="Minimize window" title="Minimize">
         <span class="material-symbols-outlined">minimize</span>
       </button>
-      <button id="maximize-btn" class="titlebar-btn">
+      <button id="maximize-btn" class="titlebar-btn" aria-label="Maximize window" title="Maximize">
         <span class="material-symbols-outlined">crop_square</span>
       </button>
-      <button id="close-btn" class="titlebar-btn close-btn">
+      <button id="close-btn" class="titlebar-btn close-btn" aria-label="Close window" title="Close">
         <span class="material-symbols-outlined">close</span>
       </button>
     </div>
@@ -34,17 +34,17 @@
     <div class="top-section">
       <div class="sidebar">
         <div class="file-actions">
-          <button id="add-files-btn" class="control-btn">
+          <button id="add-files-btn" class="control-btn" aria-label="Add audio files" title="Add files">
             <span class="material-symbols-outlined">
               add_circle
             </span>
           </button>
-          <button id="clear-queue-btn" class="control-btn">
+          <button id="clear-queue-btn" class="control-btn" aria-label="Clear queue" title="Clear queue">
             <span class="material-symbols-outlined">
               playlist_remove
             </span>
           </button>
-          <button id="dark-mode-toggle" class="control-btn toggle-btn">
+          <button id="dark-mode-toggle" class="control-btn toggle-btn" aria-label="Toggle dark mode" title="Dark mode">
             <span class="material-symbols-outlined light-icon">
               light_mode
             </span>
@@ -74,17 +74,17 @@
 
       <div class="player-controls">
         <div class="control-group">
-          <button id="shuffle-btn" class="player-control-btn toggle-btn inactive">
+          <button id="shuffle-btn" class="player-control-btn toggle-btn inactive" aria-label="Toggle shuffle" title="Shuffle">
             <span class="material-symbols-outlined">
               shuffle
             </span>
           </button>
-          <button id="prev-btn" class="player-control-btn">
+          <button id="prev-btn" class="player-control-btn" aria-label="Previous track" title="Previous">
             <span class="material-symbols-outlined">
               skip_previous
             </span>
           </button>
-          <button id="play-pause-btn" class="player-control-btn main-btn">
+          <button id="play-pause-btn" class="player-control-btn main-btn" aria-label="Play or pause" title="Play/Pause">
             <span id="play-icon" class="material-symbols-outlined">
               play_arrow
             </span>
@@ -92,19 +92,19 @@
               pause
             </span>
           </button>
-          <button id="next-btn" class="player-control-btn">
+          <button id="next-btn" class="player-control-btn" aria-label="Next track" title="Next">
             <span class="material-symbols-outlined">
               skip_next
             </span>
           </button>
-          <button id="repeat-btn" class="player-control-btn toggle-btn inactive">
+          <button id="repeat-btn" class="player-control-btn toggle-btn inactive" aria-label="Toggle repeat" title="Repeat">
             <span class="material-symbols-outlined">
               repeat
             </span>
           </button>
         </div>
         <div id="progress-container" class="progress-container">
-          <input type="range" id="progress-bar" value="0" min="0" max="100" class="progress-bar">
+          <input type="range" id="progress-bar" value="0" min="0" max="100" class="progress-bar" aria-label="Seek">
         </div>
       </div>
 
@@ -113,18 +113,25 @@
           <span class="material-symbols-outlined">
             volume_up
           </span>
-          <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="1" class="volume-slider">
+          <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="1" class="volume-slider" aria-label="Volume">
         </div>
         <div class="eq-controls-container">
-          <button id="toggle-eq-btn" class="player-control-btn">
+          <button id="toggle-eq-btn" class="player-control-btn" aria-label="Toggle equalizer" title="Equalizer">
             <span class="material-symbols-outlined">
               equalizer
             </span>
           </button>
-          <button id="toggle-chords-btn" class="player-control-btn toggle-btn" title="Chords: Normal (right-click to change mode)">
+          <button id="visual-mode-btn" class="player-control-btn" aria-label="Change visualization" title="Visualization: Orb (click to change)">
+            <span class="material-symbols-outlined">palette</span>
+          </button>
+          <button id="visual-settings-btn" class="player-control-btn" aria-label="Visualization settings" title="Visualization Settings">
+            <span class="material-symbols-outlined">tune</span>
+          </button>
+          <button id="toggle-chords-btn" class="player-control-btn toggle-btn" title="Chords: Normal (right-click to change mode)" aria-label="Toggle chord detection">
             <span class="material-symbols-outlined">music_note</span>
           </button>
           <div id="eq-controls" class="eq-controls hidden"></div>
+          <div id="viz-controls" class="eq-controls hidden" aria-label="Visualization controls"></div>
         </div>
       </div>
     </div>
@@ -132,5 +139,40 @@
 
   <!-- Correct path to renderer script -->
   <script src="src/js/renderer.js" type="module"></script>
+
+  <!-- Metadata Editor Modal -->
+  <div id="metadata-modal" class="modal-overlay hidden" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="metadata-title">
+      <h3 id="metadata-title">Edit Tags</h3>
+      <form id="metadata-form">
+        <div class="form-row">
+          <label for="meta-title">Title</label>
+          <input id="meta-title" type="text" placeholder="Song title" />
+        </div>
+        <div class="form-row">
+          <label for="meta-artist">Artist</label>
+          <input id="meta-artist" type="text" placeholder="Artist" />
+        </div>
+        <div class="form-row">
+          <label for="meta-album">Album</label>
+          <input id="meta-album" type="text" placeholder="Album" />
+        </div>
+        <div class="form-row two-col">
+          <div>
+            <label for="meta-year">Year</label>
+            <input id="meta-year" type="text" placeholder="YYYY" />
+          </div>
+          <div>
+            <label for="meta-genre">Genre</label>
+            <input id="meta-genre" type="text" placeholder="Genre" />
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" id="meta-cancel" class="control-btn">Cancel</button>
+          <button type="submit" id="meta-save" class="control-btn">Save</button>
+        </div>
+      </form>
+    </div>
+  </div>
 </body>
 </html>

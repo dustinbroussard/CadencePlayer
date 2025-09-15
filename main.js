@@ -1,7 +1,7 @@
-const { app, BrowserWindow, Menu, ipcMain } = require('electron');
 const path = require('path');
-const fs = require('fs');
 const { pathToFileURL } = require('url');
+
+const { app, BrowserWindow, ipcMain, shell } = require('electron');
 
 // Enable live reload for development
 if (process.env.NODE_ENV === 'development') {
@@ -11,7 +11,7 @@ if (process.env.NODE_ENV === 'development') {
       hardResetMethod: 'exit'
     });
   } catch (e) {
-    console.error('electron-reload not found. Run "npm install electron-reload --save-dev".');
+    console.error('electron-reload not found. Run "npm install electron-reload --save-dev".', e);
   }
 }
 
@@ -65,6 +65,75 @@ ipcMain.handle('select-audio-files', async () => {
       const url = pathToFileURL(filePath).href;
       return { path: filePath, name: fileName, url };
     });
+  }
+});
+
+// Convert filesystem paths to safe file:// URLs (for drag-and-drop)
+ipcMain.handle('paths-to-file-urls', async (_evt, filePaths = []) => {
+  try {
+    return filePaths.map(fp => {
+      const fileName = path.basename(fp);
+      const url = pathToFileURL(fp).href;
+      return { path: fp, name: fileName, url };
+    });
+  } catch (e) {
+    console.error('Failed to convert paths to file URLs', e);
+    return [];
+  }
+});
+
+// Read metadata using music-metadata
+ipcMain.handle('read-metadata', async (_evt, filePath) => {
+  try {
+    const mm = require('music-metadata');
+    const meta = await mm.parseFile(filePath, { duration: false });
+    const { common } = meta || {};
+    return {
+      success: true,
+      tags: {
+        title: common?.title || '',
+        artist: (common?.artist || '') || (Array.isArray(common?.artists) ? common.artists.join(', ') : ''),
+        album: common?.album || '',
+        year: common?.year ? String(common.year) : '',
+        genre: Array.isArray(common?.genre) ? common.genre.join(', ') : (common?.genre || '')
+      }
+    };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+});
+
+// Write metadata (currently supports MP3 via node-id3)
+ipcMain.handle('write-metadata', async (_evt, payload) => {
+  const { filePath, tags } = payload || {};
+  try {
+    const ext = (filePath.split('.').pop() || '').toLowerCase();
+    if (ext === 'mp3') {
+      const NodeID3 = require('node-id3');
+      const id3Tags = {
+        title: tags?.title || undefined,
+        artist: tags?.artist || undefined,
+        album: tags?.album || undefined,
+        year: tags?.year || undefined,
+        genre: tags?.genre || undefined
+      };
+      const ok = NodeID3.update(id3Tags, filePath);
+      return ok ? { success: true } : { success: false, error: 'Failed to write ID3 tags' };
+    }
+    // Unsupported write: report gracefully
+    return { success: false, error: `Writing tags not supported for .${ext} yet` };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+});
+
+// Reveal in folder
+ipcMain.handle('reveal-in-folder', async (_evt, filePath) => {
+  try {
+    shell.showItemInFolder(filePath);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: String(e) };
   }
 });
 
