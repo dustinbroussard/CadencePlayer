@@ -48,6 +48,10 @@ export class Visualizer {
     this._specCanvas = document.createElement('canvas');
     this._specCtx = this._specCanvas.getContext('2d');
 
+    // Track logical (CSS pixel) size separately from backing store
+    this.cssWidth = this.canvas.clientWidth || this.canvas.offsetWidth || 0;
+    this.cssHeight = this.canvas.clientHeight || this.canvas.offsetHeight || 0;
+
     this.resizeCanvas();
     window.addEventListener('resize', () => this.resizeCanvas());
   }
@@ -55,17 +59,24 @@ export class Visualizer {
   resizeCanvas() {
     // High-DPI aware sizing for crisper visuals
     const ratio = Math.max(1, Math.floor(window.devicePixelRatio || 1));
-    const cssW = this.canvas.clientWidth || this.canvas.offsetWidth;
-    const cssH = this.canvas.clientHeight || this.canvas.offsetHeight;
+    const cssW = this.canvas.clientWidth || this.canvas.offsetWidth || 0;
+    const cssH = this.canvas.clientHeight || this.canvas.offsetHeight || 0;
+
+    // Cache logical drawing size (CSS px)
+    this.cssWidth = cssW;
+    this.cssHeight = cssH;
+
+    // Backing store in device pixels
     this.canvas.width = Math.max(1, Math.floor(cssW * ratio));
     this.canvas.height = Math.max(1, Math.floor(cssH * ratio));
     this.canvas.style.width = `${cssW}px`;
     this.canvas.style.height = `${cssH}px`;
+    // Set transform so 1 unit == 1 CSS pixel
     this.canvasCtx.setTransform(ratio, 0, 0, ratio, 0, 0);
 
-    // Spectrogram buffer mirrors canvas size (CSS pixels)
-    this._specCanvas.width = cssW;
-    this._specCanvas.height = cssH;
+    // Spectrogram buffer mirrors logical size (CSS pixels)
+    this._specCanvas.width = Math.max(1, Math.floor(cssW));
+    this._specCanvas.height = Math.max(1, Math.floor(cssH));
   }
 
   start() {
@@ -73,7 +84,9 @@ export class Visualizer {
   }
 
   draw() {
-    if (!this.analyser) return;
+    if (!this.analyser || !this.canvasCtx) return;
+    // Skip work if canvas has no layout size yet (e.g., hidden or not measured)
+    if (!this.cssWidth || !this.cssHeight) return;
     const now = performance.now();
     const minDt = 1000 / Math.max(1, this.fpsCap);
     if (this._lastDraw && (now - this._lastDraw) < minDt) return;
@@ -86,9 +99,9 @@ export class Visualizer {
     if (this.mode === 'particles') {
       const fade = Math.min(0.2, Math.max(0, this.config.particles?.trail ?? 0.08));
       this.canvasCtx.fillStyle = `rgba(0,0,0,${fade})`;
-      this.canvasCtx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+      this.canvasCtx.fillRect(0, 0, this.cssWidth, this.cssHeight);
     } else {
-      this.canvasCtx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      this.canvasCtx.clearRect(0, 0, this.cssWidth, this.cssHeight);
     }
     this.hue = (this.hue + 0.5) % 360;
 
@@ -107,8 +120,8 @@ export class Visualizer {
         break;
       case 'orb':
       default: {
-        const centerX = this.canvas.width / 2;
-        const centerY = this.canvas.height / 2;
+        const centerX = this.cssWidth / 2;
+        const centerY = this.cssHeight / 2;
         const baseRadius = Math.min(centerX, centerY) * (this.config.orb?.scale ?? 0.4);
         this.drawPulseOrb(centerX, centerY, baseRadius);
         this.drawFrequencyBars(centerX, centerY, baseRadius);
@@ -180,7 +193,8 @@ export class Visualizer {
 
   // Mode: horizontal mirrored bars with rainbow gradient
   drawBars() {
-    const { width, height } = this.canvas;
+    const width = this.cssWidth;
+    const height = this.cssHeight;
     const ctx = this.canvasCtx;
     const conf = this.config.bars || {};
     const barCount = Math.min(conf.count || 160, this.dataArray.length);
@@ -202,7 +216,8 @@ export class Visualizer {
 
   // Mode: neon waveform line
   drawWave() {
-    const { width, height } = this.canvas;
+    const width = this.cssWidth;
+    const height = this.cssHeight;
     const ctx = this.canvasCtx;
     const arr = this.timeArray;
     if (!arr || arr.length === 0) return;
@@ -249,12 +264,13 @@ export class Visualizer {
       }
     }
     // Composite to main canvas
-    ctx.drawImage(this._specCanvas, 0, 0, this.canvas.width, this.canvas.height);
+    ctx.drawImage(this._specCanvas, 0, 0, this.cssWidth, this.cssHeight);
   }
 
   // Mode: particle bursts reacting to bass/mids/highs with trails
   drawParticles() {
-    const { width, height } = this.canvas;
+    const width = this.cssWidth;
+    const height = this.cssHeight;
     const ctx = this.canvasCtx;
     const centerX = width / 2;
     const centerY = height / 2;

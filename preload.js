@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Utility: convert dropped file paths to safe file URLs
   pathsToFileUrls: (paths) => ipcRenderer.invoke('paths-to-file-urls', paths),
+  // Check if filesystem paths exist
+  checkPathsExist: (paths) => ipcRenderer.invoke('check-paths-exist', paths),
 
   // Metadata: read and write
   readMetadata: (filePath) => ipcRenderer.invoke('read-metadata', filePath),

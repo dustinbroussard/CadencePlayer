@@ -156,7 +156,17 @@ export class AudioManager {
   async addFilesToQueue(files) {
     for (const file of files) {
       try {
-        const audio = new Audio();
+        const ext = (file.name?.split('.')?.pop() || '').toLowerCase();
+        const isVideo = (ext === 'mp4' || ext === 'm4v' || ext === 'webm');
+        const audio = isVideo ? document.createElement('video') : new Audio();
+        // Keep media element hidden if it's a <video>
+        if (audio.tagName === 'VIDEO') {
+          audio.style.display = 'none';
+          audio.setAttribute('playsinline', '');
+          audio.setAttribute('webkit-playsinline', '');
+        }
+        // Help Chromium get metadata quickly
+        audio.preload = 'metadata';
         // Prefer secure file URL provided by main process
         const url = file.url || `file://${file.path}`;
         audio.src = url;
@@ -171,11 +181,12 @@ export class AudioManager {
               audio: audio,
               duration: audio.duration,
               source: null,
-              meta: null
+              meta: null,
+              isVideo: isVideo
             });
             resolve();
           };
-          audio.onerror = () => reject(new Error(`Failed to load audio: ${file.name}`));
+          audio.onerror = () => reject(new Error(`Failed to load media: ${file.name}`));
         });
         // Best-effort: read metadata in background; when it returns, refresh UI
         try {
@@ -200,6 +211,17 @@ export class AudioManager {
     this.emit('queue-updated');
     // Autostart if nothing was playing and we now have tracks
     if (this.currentIndex === -1 && this.queue.length > 0) this.playTrack(0);
+  }
+
+  // Convenience helpers for renderer
+  getCurrentTrack() {
+    if (this.currentIndex < 0 || this.currentIndex >= this.queue.length) return null;
+    return this.queue[this.currentIndex];
+  }
+
+  isCurrentVideo() {
+    const t = this.getCurrentTrack();
+    return !!(t && t.isVideo);
   }
 
   // Move a track to play next (right after current index)
@@ -242,6 +264,51 @@ export class AudioManager {
       this.source = null;
     }
     this.emit('track-loaded', null);
+    this.emit('queue-updated');
+  }
+
+  /**
+   * Move a track from one index to another within the queue.
+   * Adjusts currentIndex appropriately and keeps playback state.
+   */
+  moveTrack(fromIndex, toIndex) {
+    if (fromIndex === toIndex) return;
+    if (fromIndex < 0 || fromIndex >= this.queue.length) return;
+    if (toIndex < 0 || toIndex >= this.queue.length) return;
+
+    const wasPlaying = this.isPlaying;
+    const movingCurrent = fromIndex === this.currentIndex;
+
+    // When moving forward in the list, removing the item shifts the target
+    // index left by one. Adjust so that "move to index N" reflects the
+    // intended final position relative to the original list.
+    let targetIndex = toIndex;
+    // When moving forward and NOT moving the current track, adjust target down by 1
+    // so the final position matches the intended index in the original list.
+    if (!movingCurrent && fromIndex < toIndex) targetIndex -= 1;
+
+    const [item] = this.queue.splice(fromIndex, 1);
+    this.queue.splice(targetIndex, 0, item);
+
+    // Reconcile currentIndex
+    if (movingCurrent) {
+      this.currentIndex = targetIndex;
+    } else {
+      // If an item before the current track moved past it
+      if (fromIndex < this.currentIndex && targetIndex >= this.currentIndex) {
+        this.currentIndex -= 1;
+      }
+      // If an item after the current track moved before it
+      else if (fromIndex > this.currentIndex && targetIndex <= this.currentIndex) {
+        this.currentIndex += 1;
+      }
+    }
+
+    // Maintain playback if it was running
+    if (movingCurrent && wasPlaying && this.source?.mediaElement) {
+      // No need to rewire nodes; just ensure UI updates
+      this.emit('track-loaded', this.queue[this.currentIndex]);
+    }
     this.emit('queue-updated');
   }
 
@@ -398,9 +465,14 @@ export class AudioManager {
   }
   
   setEqGain(index, value) {
-    if (this.filters[index]) {
-      this.filters[index].gain.value = parseFloat(value);
-    }
+    const filter = this.filters[index];
+    if (!filter) return;
+    let v = Number(value);
+    if (!Number.isFinite(v)) v = 0; // guard against NaN/Infinity
+    // Clamp to UI-supported range
+    if (v > 20) v = 20;
+    if (v < -20) v = -20;
+    filter.gain.value = v;
   }
 
   toggleShuffle() {

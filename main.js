@@ -1,7 +1,7 @@
 const path = require('path');
 const { pathToFileURL } = require('url');
 
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Menu, dialog } = require('electron');
 
 // Enable live reload for development
 if (process.env.NODE_ENV === 'development') {
@@ -26,11 +26,15 @@ function createWindow() {
     show: false, // Don't show until ready
     frame: false, // Custom title bar
     titleBarStyle: 'hidden', // Hide title bar on macOS
+    icon: path.join(__dirname, 'assets', 'icon.png'),
+    // Prevent white flash while loading renderer
+    backgroundColor: '#000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       webSecurity: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      sandbox: true
     }
   });
 
@@ -49,12 +53,69 @@ function createWindow() {
   }
 }
 
+function setAppMenu() {
+  app.setAboutPanelOptions?.({
+    applicationName: 'Cadence Player',
+    applicationVersion: app.getVersion(),
+    credits: 'Code Maniac',
+  });
+
+  const showShortcuts = () => {
+    const msg = [
+      'Keyboard Shortcuts:',
+      '',
+      'Space: Play/Pause',
+      'Arrow Left/Right: Seek ±5s',
+      'Arrow Up/Down: Volume ±5%',
+      'S: Toggle Shuffle',
+      'R: Toggle Repeat',
+      'M: Toggle Chords',
+      'C: Cycle Chord Mode',
+      'D: Toggle Diagnostics Overlay',
+      'Esc: Close panels/menus',
+    ].join('\n');
+    dialog.showMessageBox({ type: 'info', buttons: ['OK'], title: 'Keyboard Shortcuts', message: msg });
+  };
+
+  const template = [];
+  if (process.platform === 'darwin') {
+    template.push({ role: 'appMenu' });
+  } else {
+    template.push({ label: 'File', submenu: [{ role: 'quit' }] });
+  }
+
+  template.push(
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+        ...(process.env.NODE_ENV === 'development' ? [{ role: 'toggleDevTools' }] : []),
+      ],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        { label: 'Keyboard Shortcuts', click: showShortcuts },
+        { type: 'separator' },
+        { label: 'About Cadence Player', click: () => (app.showAboutPanel ? app.showAboutPanel() : showShortcuts()) },
+      ],
+    }
+  );
+
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
+
 // IPC Handlers
 ipcMain.handle('select-audio-files', async () => {
   const { dialog } = require('electron');
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile', 'multiSelections'],
-    filters: [{ name: 'Audio Files', extensions: ['mp3', 'wav', 'ogg', 'm4a'] }]
+    // Keep in sync with renderer drag-and-drop acceptance
+    filters: [{ name: 'Media Files', extensions: ['mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac', 'mp4', 'm4v', 'webm'] }]
   });
 
   if (result.canceled) {
@@ -103,6 +164,19 @@ ipcMain.handle('read-metadata', async (_evt, filePath) => {
   }
 });
 
+// Check if paths exist on disk
+ipcMain.handle('check-paths-exist', async (_evt, filePaths = []) => {
+  try {
+    const fs = require('fs');
+    return filePaths.map(fp => {
+      try { return fs.existsSync(fp); } catch { return false; }
+    });
+  } catch (e) {
+    console.error('check-paths-exist failed', e);
+    return filePaths.map(() => false);
+  }
+});
+
 // Write metadata (currently supports MP3 via node-id3)
 ipcMain.handle('write-metadata', async (_evt, payload) => {
   const { filePath, tags } = payload || {};
@@ -140,6 +214,7 @@ ipcMain.handle('reveal-in-folder', async (_evt, filePath) => {
 // App event handlers
 app.whenReady().then(() => {
   createWindow();
+  setAppMenu();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -4,7 +4,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
 :root {
   --bg-color: #000000;
-  --bg-gradient: linear-gradient(135deg, #00000 0%, #373738 50%, #373738 100%);
+  --bg-gradient: linear-gradient(135deg, #000000 0%, #373738 50%, #373738 100%);
   --sidebar-bg: rgba(17, 17, 17, 0.5);
   --header-bg: rgba(17, 17, 17, 0.9);
   --text-color: #f0f0f0;
@@ -12,14 +12,27 @@
   --accent-color: #4CAF50;
   --btn-bg: rgba(45, 45, 45, 0.7);
   --btn-hover-bg: rgba(68, 68, 68, 0.8);
+  --titlebar-hover-bg: rgba(255, 255, 255, 0.1);
   --border-color: rgba(255, 255, 255, 0.1);
   --playing-bg: rgba(76, 175, 80, 0.1);
   --playing-border: rgba(76, 175, 80, 0.5);
+  /* Surfaces and controls that need per-mode contrast */
+  --item-bg: rgba(255, 255, 255, 0.05);
+  --item-bg-hover: rgba(255, 255, 255, 0.1);
+  --track-bg: rgba(255, 255, 255, 0.2);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.2);
+  --chord-bg: rgba(255, 255, 255, 0.08);
+  --input-bg: rgba(255, 255, 255, 0.06);
   --radius: 1rem;
   --radius-sm: 0.5rem;
   --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.25);
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.3);
   --transition: 0.3s ease-in-out;
+  --transition-fast: 200ms ease-in-out;
+  --transition-slow: 400ms ease-in-out;
+  /* Controls grid sizing */
+  --icon-grid-size: clamp(36px, 4.2vw, 44px);
+  --icon-grid-gap: 8px;
 }
 
 * {
@@ -50,9 +63,30 @@ body.dark-mode {
   --accent-color: #4CAF50;
   --btn-bg: rgba(0, 0, 0, 0.06);
   --btn-hover-bg: rgba(0, 0, 0, 0.1);
+  --titlebar-hover-bg: rgba(0, 0, 0, 0.08);
   --border-color: rgba(0, 0, 0, 0.12);
   --playing-bg: rgba(76, 175, 80, 0.08);
   --playing-border: rgba(76, 175, 80, 0.45);
+  /* Light-mode tuned surfaces */
+  --item-bg: rgba(0, 0, 0, 0.05);
+  --item-bg-hover: rgba(0, 0, 0, 0.08);
+  --track-bg: rgba(0, 0, 0, 0.18);
+  --scrollbar-thumb: rgba(0, 0, 0, 0.25);
+  --chord-bg: rgba(0, 0, 0, 0.06);
+  --input-bg: rgba(0, 0, 0, 0.04);
+}
+
+/* Respect Reduced Motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition: 1ms linear;
+    --transition-fast: 1ms linear;
+    --transition-slow: 1ms linear;
+  }
+  * {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
 }
 
 body.drag-over .app-container {
@@ -68,7 +102,8 @@ body.drag-over .app-container {
  * Title Bar (Custom Electron Frame)
  * -------------------------------------------------------------------------------- */
 .titlebar {
-  -webkit-app-region: drag;
+  /* Disable drag globally to avoid event swallowing on some Linux setups. */
+  -webkit-app-region: no-drag;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -92,7 +127,20 @@ body.drag-over .app-container {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-color);
+  position: relative;
+  /* Make the whole title area non-drag to ensure reliable clicks */
+  -webkit-app-region: no-drag;
 }
+
+/* Ensure interactive controls in the title area are clickable (not draggable) */
+.titlebar-title .titlebar-btn,
+#app-menu-btn {
+  -webkit-app-region: no-drag;
+}
+/* Ensure clicks on icons inside buttons are not treated as drag regions */
+.titlebar-btn * { -webkit-app-region: no-drag; }
+/* The settings dropdown and all its children must be clickable */
+#app-menu, #app-menu * { -webkit-app-region: no-drag; }
 
 .titlebar-controls {
   -webkit-app-region: no-drag;
@@ -107,14 +155,19 @@ body.drag-over .app-container {
   height: 34px;
   cursor: pointer;
   border-radius: var(--radius-sm);
-  transition: background var(--transition), opacity var(--transition);
+  transition: background var(--transition-fast), opacity var(--transition-fast), transform var(--transition-fast);
   opacity: 0.7;
+  -webkit-app-region: no-drag; /* ensure buttons accept clicks */
+  user-select: none;
+  -webkit-user-select: none;
 }
+.titlebar-btn.small { width: 32px; height: 28px; font-size: 18px; }
 
 .titlebar-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--titlebar-hover-bg);
   opacity: 1;
   box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
 }
 
 .titlebar-btn:focus-visible {
@@ -190,7 +243,7 @@ body.drag-over .app-container {
   justify-content: space-between;
   align-items: center;
   height: 90px;
-  transition: box-shadow var(--transition);
+  transition: box-shadow var(--transition-fast);
 }
 
 /* --------------------------------------------------------------------------------
@@ -214,7 +267,7 @@ body.drag-over .app-container {
 }
 
 .queue-list::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 255, 255, 0.2);
+  background-color: var(--scrollbar-thumb);
   border-radius: var(--radius-sm);
 }
 
@@ -222,10 +275,10 @@ body.drag-over .app-container {
 .queue-item {
   padding: 10px 15px;
   margin-bottom: 8px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--item-bg);
   border-radius: var(--radius);
   cursor: pointer;
-  transition: transform var(--transition), background var(--transition), box-shadow var(--transition);
+  transition: transform var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -236,7 +289,7 @@ body.drag-over .app-container {
 
 
 .queue-item:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--item-bg-hover);
   transform: translateX(5px);
   box-shadow: var(--shadow-md);
 }
@@ -282,6 +335,44 @@ body.drag-over .app-container {
   display: block;
 }
 
+#video-container {
+  position: relative;
+  background: black;
+}
+#video-container video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: black;
+}
+
+.video-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 12px;
+  background: linear-gradient(to top, rgba(0,0,0,0.55), rgba(0,0,0,0.0));
+}
+.video-overlay.hidden { display: none !important; }
+.video-overlay .player-control-btn.main-btn { width: 44px; height: 44px; }
+.video-overlay .progress-bar { max-width: 60%; }
+
+.video-chip {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
 /* --------------------------------------------------------------------------------
  * Player Bar
  * -------------------------------------------------------------------------------- */
@@ -312,7 +403,7 @@ body.drag-over .app-container {
   display: inline-block;
   padding: 4px 10px;
   border-radius: var(--radius-sm);
-  background: rgba(255,255,255,0.08);
+  background: var(--chord-bg);
   border: 1px solid var(--border-color);
   color: var(--text-color);
   box-shadow: var(--shadow-sm);
@@ -393,11 +484,11 @@ body.drag-over .app-container {
   -webkit-appearance: none;
   appearance: none;
   height: 5px;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--track-bg);
   border-radius: var(--radius-sm);
   cursor: pointer;
   outline: none;
-  transition: background var(--transition);
+  transition: background var(--transition-fast);
 }
 
 .progress-bar::-webkit-slider-thumb {
@@ -409,7 +500,7 @@ body.drag-over .app-container {
   border-radius: 50%;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
-  transition: box-shadow var(--transition), transform var(--transition);
+  transition: box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .progress-bar::-moz-range-thumb {
@@ -419,14 +510,14 @@ body.drag-over .app-container {
   border-radius: 50%;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
-  transition: box-shadow var(--transition), transform var(--transition);
+  transition: box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .volume-and-eq {
   flex-basis: 25%;
   display: flex;
   justify-content: flex-end;
-  gap: 20px;
+  gap: 14px;
   align-items: center;
 }
 
@@ -442,10 +533,10 @@ body.drag-over .app-container {
   -webkit-appearance: none;
   appearance: none;
   height: 5px;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--track-bg);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background var(--transition);
+  transition: background var(--transition-fast);
 }
 
 .volume-slider::-webkit-slider-thumb {
@@ -457,7 +548,7 @@ body.drag-over .app-container {
   border-radius: 50%;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
-  transition: box-shadow var(--transition), transform var(--transition);
+  transition: box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .volume-slider::-moz-range-thumb {
@@ -467,12 +558,33 @@ body.drag-over .app-container {
   border-radius: 50%;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
-  transition: box-shadow var(--transition), transform var(--transition);
+  transition: box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
 .eq-controls-container {
   position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, var(--icon-grid-size));
+  grid-auto-rows: var(--icon-grid-size);
+  grid-template-areas:
+    "eq vizmode"
+    "vizsettings chords";
+  gap: var(--icon-grid-gap);
+  align-content: center;
+  justify-items: center;
 }
+
+/* Ensure the four buttons fit neatly in the grid */
+.eq-controls-container .player-control-btn {
+  width: var(--icon-grid-size);
+  height: var(--icon-grid-size);
+}
+
+/* Lock button positions without changing HTML order */
+#toggle-eq-btn { grid-area: eq; }
+#visual-mode-btn { grid-area: vizmode; }
+#visual-settings-btn { grid-area: vizsettings; }
+#toggle-chords-btn { grid-area: chords; }
 
 .eq-controls {
   position: absolute;
@@ -487,12 +599,14 @@ body.drag-over .app-container {
   border-radius: var(--radius);
   border: 1px solid var(--border-color);
   box-shadow: var(--shadow-md);
-  z-index: 10;
-  transition: transform var(--transition), opacity var(--transition);
+  z-index: 2000;
+  overflow: visible;
+  min-width: 240px;
+  transition: transform var(--transition-fast), opacity var(--transition-fast);
 }
 
 .eq-controls.hidden {
-  transform: translateY(20px) scale(0.95);
+  transform: translateY(20px) scale(0.96);
   opacity: 0;
   pointer-events: none;
 }
@@ -507,7 +621,7 @@ body.drag-over .app-container {
 .eq-slider {
   width: 8px;
   height: 100px;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--track-bg);
   border-radius: var(--radius-sm);
   cursor: pointer;
   writing-mode: vertical-lr;
@@ -531,6 +645,35 @@ body.drag-over .app-container {
   font-size: 10px;
   color: var(--text-secondary);
 }
+
+/* Header dropdown menu */
+.dropdown-menu {
+  position: absolute; /* JS upgrades to fixed and positions under the button */
+  top: 32px;
+  left: 140px;
+  min-width: 260px;
+  background: var(--sidebar-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  padding: 8px;
+  z-index: 3000;
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+}
+.menu-item { padding: 8px 10px; cursor: pointer; border-radius: var(--radius-sm); }
+.menu-item:hover { background: var(--btn-hover-bg); }
+.menu-item.destructive { color: #ff6b6b; }
+.menu-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 4px; }
+.menu-separator { height: 1px; background: var(--border-color); margin: 6px 2px; }
+.inline-btn { background: var(--btn-bg); color: var(--text-color); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 4px 8px; cursor: pointer; }
+.inline-btn:hover { background: var(--btn-hover-bg); }
+
+/* Declutter crowded player controls by hiding duplicated quick-access buttons */
+#toggle-eq-btn,
+#visual-mode-btn,
+#visual-settings-btn,
+#toggle-chords-btn { display: none; }
 
 /* --------------------------------------------------------------------------------
  * UI Elements
@@ -557,7 +700,7 @@ body.drag-over .app-container {
   font-weight: 500;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
-  transition: background var(--transition), transform var(--transition), box-shadow var(--transition);
+  transition: background var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
 }
 
 
@@ -634,6 +777,7 @@ body.drag-over .app-container {
   align-items: center;
   justify-content: center;
   z-index: 10000;
+  animation: fadeIn var(--transition-fast) both;
 }
 .modal {
   width: 460px;
@@ -643,6 +787,7 @@ body.drag-over .app-container {
   border-radius: var(--radius);
   box-shadow: var(--shadow-md);
   padding: 16px 18px;
+  animation: scaleIn var(--transition-fast) both;
 }
 .modal h3 { margin-bottom: 10px; }
 .form-row { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
@@ -653,7 +798,51 @@ body.drag-over .app-container {
   padding: 8px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-color);
-  background: rgba(255,255,255,0.06);
+  background: var(--input-bg);
   color: var(--text-color);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
 }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
+
+/* Modal closing animation */
+.modal-overlay.closing { animation: fadeOut var(--transition-fast) both; }
+.modal-overlay.closing .modal { animation: scaleOut var(--transition-fast) both; }
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes scaleIn {
+  from { transform: translateY(6px) scale(0.98); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+@keyframes scaleOut {
+  from { transform: translateY(0) scale(1); opacity: 1; }
+  to { transform: translateY(6px) scale(0.98); opacity: 0; }
+}
+
+/* Cohesive native selects and inputs */
+select, input[type="text"], input[type="number"], input[type="range"] {
+  border-radius: var(--radius-sm);
+}
+select {
+  background: var(--btn-bg);
+  border: 1px solid var(--border-color);
+  color: var(--text-color);
+  padding: 6px 8px;
+  box-shadow: var(--shadow-sm);
+}
+select:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+/* Dark/Light toggle icons: show intent icon */
+.toggle-btn .light-icon { display: inline-flex; }
+.toggle-btn .dark-icon { display: none; }
+body.dark-mode .toggle-btn .light-icon { display: none; }
+body.dark-mode .toggle-btn .dark-icon { display: inline-flex; }

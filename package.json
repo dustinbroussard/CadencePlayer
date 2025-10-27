@@ -41,15 +41,19 @@
   "build": {
     "appId": "com.codemaniac.cadence",
     "productName": "Cadence Player",
+    "icon": "assets/icon.png",
     "linux": {
       "target": "AppImage",
-      "category": "AudioVideo"
+      "category": "AudioVideo",
+      "icon": "assets/icon.png"
     },
     "mac": {
-      "category": "public.app-category.music"
+      "category": "public.app-category.music",
+      "icon": "assets/icon.png"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "assets/icon.png"
     },
     "files": [
       "main.js",
