@@ -102,8 +102,8 @@ body.drag-over .app-container {
  * Title Bar (Custom Electron Frame)
  * -------------------------------------------------------------------------------- */
 .titlebar {
-  /* Disable drag globally to avoid event swallowing on some Linux setups. */
-  -webkit-app-region: no-drag;
+  /* Make the title bar draggable by default; override on interactive elements. */
+  -webkit-app-region: drag;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -128,8 +128,6 @@ body.drag-over .app-container {
   font-weight: 600;
   color: var(--text-color);
   position: relative;
-  /* Make the whole title area non-drag to ensure reliable clicks */
-  -webkit-app-region: no-drag;
 }
 
 /* Ensure interactive controls in the title area are clickable (not draggable) */

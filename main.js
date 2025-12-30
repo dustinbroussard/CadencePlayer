@@ -111,7 +111,6 @@ function setAppMenu() {
 
 // IPC Handlers
 ipcMain.handle('select-audio-files', async () => {
-  const { dialog } = require('electron');
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile', 'multiSelections'],
     // Keep in sync with renderer drag-and-drop acceptance

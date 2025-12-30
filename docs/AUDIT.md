@@ -80,7 +80,7 @@ Recommendations (optional):
 ## Dependency Review
 
 - Runtime: `music-metadata`, `node-id3` — both appropriate for desktop tag parsing/writing.
-- Dev: Electron 30, ESLint 9, Vitest 3, jsdom 26 — modern stack.
+- Dev: Electron 39.2.2, ESLint 9, Vitest 3, jsdom 26 — modern stack.
 - No new dependencies were added by this audit.
 
 ## CI/CD

@@ -23,7 +23,7 @@ This report documents the state of the repository, issues found, changes made, a
   - Good: `contextIsolation: true`, `nodeIntegration: false`, `webSecurity: true`, blocked navigation and `window.open`.
   - Acceptable risk: Renderer builds DOM using `textContent` for user-derived labels (e.g., presets, queue names), avoiding XSS; continue to avoid `innerHTML` for untrusted inputs.
   - Enabled: `sandbox: true` in `BrowserWindow.webPreferences` to further isolate the renderer. Preload remains the single IPC bridge and continues to function via `contextBridge` + `ipcRenderer`.
-  - Optional: Consider CSP in `index.html` for additional defense-in-depth.
+  - CSP is enabled in `index.html`; review allowances if new external resources are introduced.
 
 - Code quality and correctness
   - ESLint: passes (`npm run lint`).
@@ -72,7 +72,7 @@ This report documents the state of the repository, issues found, changes made, a
 ## Open Recommendations (Optional/Deferred)
 
 - Electron hardening:
-  - Consider `sandbox: true` in `BrowserWindow` once fully validated with preload and IPC usage. This can further reduce risk but needs thorough testing.
+  - Renderer sandboxing is enabled; validate any future preload or IPC expansions against sandbox constraints.
   - Ensure any future external content loading is prevented or heavily sanitized.
 
 - Performance:
