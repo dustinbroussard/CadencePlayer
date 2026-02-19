@@ -11,7 +11,7 @@ export class Visualizer {
     this._lastDraw = 0;
     this._lastBass = 0;
     this._lastEnergy = 0;
-    this.mode = 'orb'; // 'orb' | 'bars' | 'wave' | 'spectrogram' | 'particles'
+    this.mode = 'orb'; // 'orb' | 'bars' | 'wave' | 'spectrogram' | 'particles' | 'cover'
     this.config = {
       orb: { scale: 0.4 },
       bars: { count: 160 },
@@ -47,6 +47,9 @@ export class Visualizer {
     // Spectrogram buffer
     this._specCanvas = document.createElement('canvas');
     this._specCtx = this._specCanvas.getContext('2d');
+    this.coverImage = null;
+    this.coverReady = false;
+    this.coverUrl = '';
 
     // Track logical (CSS pixel) size separately from backing store
     this.cssWidth = this.canvas.clientWidth || this.canvas.offsetWidth || 0;
@@ -117,6 +120,9 @@ export class Visualizer {
         break;
       case 'particles':
         this.drawParticles();
+        break;
+      case 'cover':
+        this.drawCover();
         break;
       case 'orb':
       default: {
@@ -267,6 +273,47 @@ export class Visualizer {
     ctx.drawImage(this._specCanvas, 0, 0, this.cssWidth, this.cssHeight);
   }
 
+  drawCover() {
+    const width = this.cssWidth;
+    const height = this.cssHeight;
+    const ctx = this.canvasCtx;
+    const tg = this.themes[this.themeName]?.gradient || ['#222','#111','#000'];
+    const bg = ctx.createLinearGradient(0, 0, width, height);
+    bg.addColorStop(0, tg[0]);
+    bg.addColorStop(0.5, tg[1] || tg[0]);
+    bg.addColorStop(1, tg[2] || tg[1] || tg[0]);
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, width, height);
+
+    if (!this.coverImage || !this.coverReady) {
+      ctx.fillStyle = 'rgba(255,255,255,0.75)';
+      ctx.font = '600 16px Poppins, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('No cover art available', width / 2, height / 2);
+      return;
+    }
+
+    const img = this.coverImage;
+    const maxW = width * 0.75;
+    const maxH = height * 0.75;
+    const scale = Math.min(maxW / img.width, maxH / img.height);
+    const drawW = Math.max(1, img.width * scale);
+    const drawH = Math.max(1, img.height * scale);
+    const dx = (width - drawW) / 2;
+    const dy = (height - drawH) / 2;
+
+    ctx.save();
+    ctx.shadowBlur = 30;
+    ctx.shadowColor = 'rgba(0,0,0,0.45)';
+    ctx.drawImage(img, dx, dy, drawW, drawH);
+    ctx.restore();
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(dx, dy, drawW, drawH);
+  }
+
   // Mode: particle bursts reacting to bass/mids/highs with trails
   drawParticles() {
     const width = this.cssWidth;
@@ -371,7 +418,7 @@ export class Visualizer {
   }
 
   setMode(mode) {
-    const modes = new Set(['orb', 'bars', 'wave', 'spectrogram', 'particles']);
+    const modes = new Set(['orb', 'bars', 'wave', 'spectrogram', 'particles', 'cover']);
     this.mode = modes.has(mode) ? mode : 'orb';
   }
 
@@ -382,5 +429,26 @@ export class Visualizer {
   setConfig(mode, cfg) {
     if (!this.config[mode]) this.config[mode] = {};
     Object.assign(this.config[mode], cfg || {});
+  }
+
+  setCoverArt(dataUrl) {
+    if (!dataUrl) {
+      this.coverImage = null;
+      this.coverReady = false;
+      this.coverUrl = '';
+      return;
+    }
+    if (this.coverUrl === dataUrl) return;
+    this.coverUrl = dataUrl;
+    const img = new Image();
+    img.onload = () => {
+      this.coverImage = img;
+      this.coverReady = true;
+    };
+    img.onerror = () => {
+      this.coverImage = null;
+      this.coverReady = false;
+    };
+    img.src = dataUrl;
   }
 }

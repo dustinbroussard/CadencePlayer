@@ -74,7 +74,7 @@ export class AudioManager {
   }
 
   getCurrentSource() {
-    return this.source ? this.source.mediaElement : { currentTime: 0, duration: 0 };
+    return this.source ? this.source.mediaElement : { currentTime: 0, duration: 0, paused: true };
   }
 
   getCurrentIndex() {
@@ -173,7 +173,12 @@ export class AudioManager {
 
         // Get duration before adding to queue
         await new Promise((resolve, reject) => {
-          audio.onloadedmetadata = () => {
+          const cleanup = () => {
+            audio.removeEventListener('loadedmetadata', onLoaded);
+            audio.removeEventListener('error', onError);
+          };
+          const onLoaded = () => {
+            cleanup();
             this.queue.push({
               path: file.path,
               name: file.name,
@@ -186,7 +191,12 @@ export class AudioManager {
             });
             resolve();
           };
-          audio.onerror = () => reject(new Error(`Failed to load media: ${file.name}`));
+          const onError = () => {
+            cleanup();
+            reject(new Error(`Failed to load media: ${file.name}`));
+          };
+          audio.addEventListener('loadedmetadata', onLoaded, { once: true });
+          audio.addEventListener('error', onError, { once: true });
         });
         // Best-effort: read metadata in background; when it returns, refresh UI
         try {
@@ -383,27 +393,39 @@ export class AudioManager {
   }
 
   play() {
-    if (this.source && this.source.mediaElement.paused) {
-      this.source.mediaElement.play();
-      this.isPlaying = true;
+    if (!this.source) return false;
+    if (this.ctx?.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
     }
+    if (this.source.mediaElement.paused) {
+      const playPromise = this.source.mediaElement.play();
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise.then(() => { this.isPlaying = true; }).catch(() => { this.isPlaying = false; });
+      } else {
+        this.isPlaying = true;
+      }
+    }
+    return true;
   }
 
   pause() {
-    if (this.source && !this.source.mediaElement.paused) {
+    if (!this.source) return false;
+    if (!this.source.mediaElement.paused) {
       this.source.mediaElement.pause();
-      this.isPlaying = false;
     }
+    this.isPlaying = false;
+    return true;
   }
   
   playTrack(index) {
+    if (index < 0 || index >= this.queue.length) return false;
     if (this.source) {
       this.source.mediaElement.pause();
     }
 
     this.currentIndex = index;
     const track = this.queue[this.currentIndex];
-    if (!track) return;
+    if (!track) return false;
 
     // Lazily create and wire source the first time this track plays
     if (!track.source) {
@@ -414,18 +436,40 @@ export class AudioManager {
     this.source = track.source;
 
     track.audio.currentTime = 0;
-    track.audio.play();
-    this.isPlaying = true;
+    if (this.ctx?.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+    const playPromise = track.audio.play();
+    if (playPromise && typeof playPromise.then === 'function') {
+      playPromise.then(() => { this.isPlaying = true; }).catch(() => { this.isPlaying = false; });
+    } else {
+      this.isPlaying = true;
+    }
     
+    track.audio.onplay = () => {
+      this.isPlaying = true;
+      this.emit('playback-state', true);
+    };
+    track.audio.onpause = () => {
+      this.isPlaying = false;
+      this.emit('playback-state', false);
+    };
     track.audio.onended = () => {
+      this.isPlaying = false;
       this.emit('playback-ended');
     };
     
     this.emit('track-loaded', track);
     this.emit('queue-updated'); // Re-render queue to highlight playing track
+    return true;
   }
   
   playNext() {
+    if (this.queue.length === 0) return;
+    if (this.currentIndex === -1) {
+      this.playTrack(0);
+      return;
+    }
     let nextIndex = this.currentIndex + 1;
     if (this.isShuffled) {
       const remainingTracks = this.queue.filter((_, i) => i !== this.currentIndex);
@@ -446,6 +490,11 @@ export class AudioManager {
   }
   
   playPrev() {
+    if (this.queue.length === 0) return;
+    if (this.currentIndex === -1) {
+      this.playTrack(0);
+      return;
+    }
     let prevIndex = this.currentIndex - 1;
     if (prevIndex < 0) {
       prevIndex = this.queue.length - 1;
@@ -454,14 +503,19 @@ export class AudioManager {
   }
 
   setVolume(value) {
-    const v = Math.max(0, Math.min(1, parseFloat(value)));
+    const num = Number(value);
+    if (!Number.isFinite(num)) return;
+    const v = Math.max(0, Math.min(1, num));
     if (this.masterGain) this.masterGain.gain.value = v;
   }
   
   seek(progress) {
-    if (this.source) {
-      this.source.mediaElement.currentTime = this.source.mediaElement.duration * progress;
-    }
+    if (!this.source) return;
+    const duration = Number(this.source.mediaElement.duration);
+    if (!Number.isFinite(duration) || duration <= 0) return;
+    const p = Math.max(0, Math.min(1, Number(progress)));
+    if (!Number.isFinite(p)) return;
+    this.source.mediaElement.currentTime = duration * p;
   }
   
   setEqGain(index, value) {

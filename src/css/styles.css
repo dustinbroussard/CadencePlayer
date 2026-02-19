@@ -52,6 +52,10 @@ body {
   transition: background var(--transition), color var(--transition);
 }
 
+body.is-inactive {
+  filter: saturate(0.8) brightness(0.92);
+}
+
 body.dark-mode {
   /* Softer, warmer light palette */
   --bg-color: #efefef;
@@ -96,6 +100,47 @@ body.drag-over .app-container {
 
 .hidden {
   display: none !important;
+}
+
+/* Error banner */
+.error-banner {
+  position: fixed;
+  top: 50px;
+  right: 20px;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  background: rgba(220, 38, 38, 0.9);
+  color: #fff;
+  box-shadow: var(--shadow-md);
+  max-width: min(520px, calc(100vw - 40px));
+}
+
+.error-banner-message {
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.error-banner-close {
+  background: rgba(255, 255, 255, 0.18);
+  border: none;
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.error-banner-close:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.error-banner-close:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
 }
 
 /* --------------------------------------------------------------------------------
@@ -487,6 +532,12 @@ body.drag-over .app-container {
   cursor: pointer;
   outline: none;
   transition: background var(--transition-fast);
+}
+
+.progress-bar:focus-visible,
+.volume-slider:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
 }
 
 .progress-bar::-webkit-slider-thumb {

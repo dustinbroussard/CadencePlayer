@@ -26,9 +26,26 @@ CadencePlayer is an Electron-based music player with a built-in visualizer and r
 
 ## Development
 
+- Requirements:
+  - Node.js 20+ (recommended) and npm
+  - Electron downloads via npm install
+  - Optional (Linux): `ffmpeg` for broader codec support
+
+- Environment variables:
+  - `NODE_ENV=development` enables live reload and DevTools
+
+- Install: `npm install`
+- Run (prod): `npm start`
+- Run (dev): `npm run dev`
 - Test: `npm test` (Vitest + jsdom)
 - Lint: `npm run lint` / `npm run lint:fix`
 - Format: `npm run format`
+
+## Audio/Video Support
+
+CadencePlayer uses Chromium's media stack via Electron (WebAudio + HTMLMediaElement). Most common formats are supported out of the box (MP3, WAV, AAC, M4A, OGG, FLAC, MP4, WebM). On some Linux distributions you may need to install `ffmpeg`/`libavcodec-extra` for MP3/AAC playback.
+
+Chord recognition runs entirely in the renderer using WebAudio analysers; no external DSP libraries (e.g., Librosa/PortAudio) are required.
 
 ## CI
 
@@ -37,3 +54,4 @@ This repo includes a GitHub Actions workflow that runs linting and tests on push
 ## Audit
 
 A detailed repository audit with findings and recommendations is available at `docs/AUDIT.md`.
+The latest debug-focused bug report is available at `docs/BUG_REPORT.md`.

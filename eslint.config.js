@@ -26,6 +26,11 @@ module.exports = [
       'import/order': ['warn', { 'newlines-between': 'always' }],
     },
   },
+  {
+    files: ['main.js', 'preload.js'],
+    languageOptions: {
+      sourceType: 'script',
+    },
+  },
   prettier,
 ];
-

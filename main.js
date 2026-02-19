@@ -1,3 +1,5 @@
+'use strict';
+
 const path = require('path');
 const { pathToFileURL } = require('url');
 
@@ -16,6 +18,8 @@ if (process.env.NODE_ENV === 'development') {
 }
 
 let mainWindow;
+
+const isNonEmptyString = (value) => typeof value === 'string' && value.trim().length > 0;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -131,7 +135,8 @@ ipcMain.handle('select-audio-files', async () => {
 // Convert filesystem paths to safe file:// URLs (for drag-and-drop)
 ipcMain.handle('paths-to-file-urls', async (_evt, filePaths = []) => {
   try {
-    return filePaths.map(fp => {
+    const safePaths = Array.isArray(filePaths) ? filePaths.filter(isNonEmptyString) : [];
+    return safePaths.map(fp => {
       const fileName = path.basename(fp);
       const url = pathToFileURL(fp).href;
       return { path: fp, name: fileName, url };
@@ -145,9 +150,15 @@ ipcMain.handle('paths-to-file-urls', async (_evt, filePaths = []) => {
 // Read metadata using music-metadata
 ipcMain.handle('read-metadata', async (_evt, filePath) => {
   try {
+    if (!isNonEmptyString(filePath)) {
+      return { success: false, error: 'Invalid file path' };
+    }
     const mm = require('music-metadata');
     const meta = await mm.parseFile(filePath, { duration: false });
     const { common } = meta || {};
+    const picture = Array.isArray(common?.picture) ? common.picture[0] : null;
+    const pictureData = picture?.data ? picture.data.toString('base64') : '';
+    const pictureFormat = picture?.format || picture?.type || 'image/jpeg';
     return {
       success: true,
       tags: {
@@ -155,7 +166,8 @@ ipcMain.handle('read-metadata', async (_evt, filePath) => {
         artist: (common?.artist || '') || (Array.isArray(common?.artists) ? common.artists.join(', ') : ''),
         album: common?.album || '',
         year: common?.year ? String(common.year) : '',
-        genre: Array.isArray(common?.genre) ? common.genre.join(', ') : (common?.genre || '')
+        genre: Array.isArray(common?.genre) ? common.genre.join(', ') : (common?.genre || ''),
+        picture: pictureData ? { data: pictureData, format: pictureFormat } : null
       }
     };
   } catch (e) {
@@ -167,7 +179,8 @@ ipcMain.handle('read-metadata', async (_evt, filePath) => {
 ipcMain.handle('check-paths-exist', async (_evt, filePaths = []) => {
   try {
     const fs = require('fs');
-    return filePaths.map(fp => {
+    const safePaths = Array.isArray(filePaths) ? filePaths.filter(isNonEmptyString) : [];
+    return safePaths.map(fp => {
       try { return fs.existsSync(fp); } catch { return false; }
     });
   } catch (e) {
@@ -180,6 +193,9 @@ ipcMain.handle('check-paths-exist', async (_evt, filePaths = []) => {
 ipcMain.handle('write-metadata', async (_evt, payload) => {
   const { filePath, tags } = payload || {};
   try {
+    if (!isNonEmptyString(filePath)) {
+      return { success: false, error: 'Invalid file path' };
+    }
     const ext = (filePath.split('.').pop() || '').toLowerCase();
     if (ext === 'mp3') {
       const NodeID3 = require('node-id3');
@@ -203,6 +219,9 @@ ipcMain.handle('write-metadata', async (_evt, payload) => {
 // Reveal in folder
 ipcMain.handle('reveal-in-folder', async (_evt, filePath) => {
   try {
+    if (!isNonEmptyString(filePath)) {
+      return { success: false, error: 'Invalid file path' };
+    }
     shell.showItemInFolder(filePath);
     return { success: true };
   } catch (e) {

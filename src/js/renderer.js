@@ -56,11 +56,10 @@ export class Renderer {
     this.videoModeChip = document.getElementById('video-mode-chip');
     this.videoChipText = document.getElementById('video-chip-text');
 
+    // Cache visualization mode to avoid frequent localStorage reads
+    this._vizMode = localStorage.getItem('vizMode') || 'orb';
     // Remember last non-video viz mode for auto-restore
-    this.prevNonVideoMode = (() => {
-      const m = localStorage.getItem('vizMode') || 'orb';
-      return m === 'video' ? 'orb' : m;
-    })();
+    this.prevNonVideoMode = this._vizMode === 'video' ? 'orb' : this._vizMode;
     this.toggleChordsBtn = document.getElementById('toggle-chords-btn');
     this.eqControls = document.getElementById('eq-controls');
     // Cache for EQ sliders to update when applying presets
@@ -74,6 +73,10 @@ export class Renderer {
     // App menu (header dropdown)
     this.appMenuBtn = document.getElementById('app-menu-btn');
     this.appMenu = document.getElementById('app-menu');
+    // Error banner for runtime issues
+    this.errorBanner = document.getElementById('error-banner');
+    this.errorBannerMessage = document.getElementById('error-banner-message');
+    this.errorBannerClose = document.getElementById('error-banner-close');
 
     // Metadata overrides store (persisted in localStorage)
     this.metaOverrides = (() => { try { return JSON.parse(localStorage.getItem('metadataOverrides') || '{}'); } catch { return {}; } })();
@@ -86,6 +89,8 @@ export class Renderer {
     this.detectorRunning = false; // ensures detector starts only once per track
     this.chordsEnabled = true;
     this.chordMode = 'lowcpu'; // 'responsive' | 'normal' | 'accurate' | 'lowcpu'
+    // Avoid allocating a new bound function on every animation frame
+    this._updateLoop = this.update.bind(this);
 
     // Restore persisted preferences before wiring up handlers so UI reflects
     // the user's last session immediately on launch.
@@ -98,6 +103,7 @@ export class Renderer {
     // Initialize saved-queue modal controls (save/close/confirm handlers)
     this.initQueueSaveUi();
     this.initAppMenu();
+    this.initErrorHandling();
     // Prepare video overlay controls if user switches to video mode
     this.initVideoOverlayHandlers();
 
@@ -133,15 +139,15 @@ export class Renderer {
   autoSwitchVisualizationForTrack(track) {
     try {
       const isVideo = !!(track && track.isVideo);
-      const cur = localStorage.getItem('vizMode') || 'orb';
+      const cur = this.getVizMode();
       if (isVideo && cur !== 'video') {
         this.prevNonVideoMode = cur === 'video' ? this.prevNonVideoMode : cur;
-        localStorage.setItem('vizMode', 'video');
+        this.setVizMode('video');
         this.updateVisualizationUi('video');
       } else if (!isVideo && cur === 'video') {
         const restore = this.prevNonVideoMode || 'orb';
         if (this.visualizer.setMode) this.visualizer.setMode(restore);
-        localStorage.setItem('vizMode', restore);
+        this.setVizMode(restore);
         this.updateVisualizationUi(restore);
       }
     } catch { /* ignore */ }
@@ -218,7 +224,7 @@ export class Renderer {
     }
 
     // Visualization mode
-    const viz = localStorage.getItem('vizMode');
+    const viz = this.getVizMode();
     if (viz) {
       if (this.visualizer.setMode) this.visualizer.setMode(viz);
       this.updateVisualizationUi();
@@ -232,6 +238,21 @@ export class Renderer {
 
     // Ensure UI reflects the restored settings
     this.updateChordToggleUi();
+  }
+
+  getVizMode() {
+    if (this._vizMode) return this._vizMode;
+    const m = localStorage.getItem('vizMode') || 'orb';
+    this._vizMode = m;
+    return m;
+  }
+
+  setVizMode(mode) {
+    const allowed = new Set(['orb', 'bars', 'wave', 'spectrogram', 'particles', 'cover', 'video']);
+    const next = allowed.has(mode) ? mode : 'orb';
+    this._vizMode = next;
+    try { localStorage.setItem('vizMode', next); } catch { /* ignore */ }
+    return next;
   }
 
   initEventListeners() {
@@ -274,6 +295,7 @@ export class Renderer {
     // Audio Manager events
     this.audioManager.on('track-loaded', (track) => {
       this.updateTrackInfo(track);
+      this.updateCoverArt(track);
       this.detectorRunning = false; // allow detector to restart for new track
       this.startChordDetectorWhenReady();
       this.autoSwitchVisualizationForTrack(track);
@@ -281,12 +303,14 @@ export class Renderer {
     });
     this.audioManager.on('playback-ended', () => this.handlePlaybackEnd());
     this.audioManager.on('queue-updated', () => this.renderQueue());
+    this.audioManager.on('playback-state', (playing) => this.syncPlaybackUi(playing));
 
     // Kick off chord detector after first user interaction
     document.addEventListener('click', () => this.startChordDetectorWhenReady(), { once: true });
 
     // Toggle diagnostics overlay with "D"
     document.addEventListener('keydown', (e) => {
+      if (this.isEditableTarget(e.target)) return;
       if (e.key.toLowerCase() === 'd' && this.diagEl) {
         this.diagEl.classList.toggle('hidden');
       }
@@ -294,6 +318,7 @@ export class Renderer {
 
     // Global playback and app shortcuts
     document.addEventListener('keydown', (e) => {
+      if (this.isEditableTarget(e.target)) return;
       const key = e.key;
       const activeTag = (e.target && e.target.tagName) ? e.target.tagName.toLowerCase() : '';
       const isRange = activeTag === 'input' && (e.target.type === 'range');
@@ -353,7 +378,7 @@ export class Renderer {
 
     // Start the visualizer
     this.visualizer.start();
-    requestAnimationFrame(this.update.bind(this));
+    requestAnimationFrame(this._updateLoop);
 
     // Click-away to close floating control panels and context menus
     document.addEventListener('click', (e) => {
@@ -375,8 +400,7 @@ export class Renderer {
   clearQueue() {
     this.audioManager.clearQueue();
     // Reset playback icons
-    this.playIcon.classList.remove('hidden');
-    this.pauseIcon.classList.add('hidden');
+    this.syncPlaybackUi(false);
     // Reset progress and labels
     this.progressBar.value = 0;
     this.trackDurationEl.textContent = '';
@@ -434,39 +458,31 @@ export class Renderer {
 
   // Player controls
   togglePlayback() {
+    const track = this.audioManager.getCurrentTrack();
+    if (!track) return;
     if (this.audioManager.isPlaying) {
-      this.audioManager.pause();
+      if (!this.audioManager.pause()) return;
       // Stop chord detection when paused to save CPU and avoid flicker
       this.chordDetector.stop();
       this.detectorRunning = false;
-      this.playIcon.classList.remove('hidden');
-      this.pauseIcon.classList.add('hidden');
-      if (this.videoPlayIcon && this.videoPauseIcon) {
-        this.videoPlayIcon.classList.remove('hidden');
-        this.videoPauseIcon.classList.add('hidden');
-      }
+      this.syncPlaybackUi(false);
     } else {
-      this.audioManager.play();
-      this.playIcon.classList.add('hidden');
-      this.pauseIcon.classList.remove('hidden');
-      if (this.videoPlayIcon && this.videoPauseIcon) {
-        this.videoPlayIcon.classList.add('hidden');
-        this.videoPauseIcon.classList.remove('hidden');
-      }
+      if (!this.audioManager.play()) return;
+      this.syncPlaybackUi(true);
       this.startChordDetectorWhenReady(); // ensure detector starts when playback begins
     }
   }
 
   nextTrack() {
+    if (!this.audioManager.getQueue().length) return;
     this.audioManager.playNext();
-    this.playIcon.classList.add('hidden');
-    this.pauseIcon.classList.remove('hidden');
+    this.syncPlaybackUi(true);
   }
 
   prevTrack() {
+    if (!this.audioManager.getQueue().length) return;
     this.audioManager.playPrev();
-    this.playIcon.classList.add('hidden');
-    this.pauseIcon.classList.remove('hidden');
+    this.syncPlaybackUi(true);
   }
   
   seekTrack(value) {
@@ -481,6 +497,23 @@ export class Renderer {
     this.trackNameEl.textContent = name;
     this.progressBar.value = 0;
     this.trackDurationEl.textContent = track ? '0:00 / ' + this.formatTime(track.duration) : '';
+  }
+
+  updateCoverArt(track) {
+    if (!this.visualizer?.setCoverArt) return;
+    const dataUrl = this.getCoverArtDataUrl(track);
+    this.visualizer.setCoverArt(dataUrl);
+    const mode = this.getVizMode();
+    if (mode === 'cover') this.visualizer.draw();
+  }
+
+  getCoverArtDataUrl(track) {
+    if (!track || !track.meta || !track.meta.picture) return '';
+    const pic = track.meta.picture || {};
+    const data = pic.data || '';
+    if (!data) return '';
+    const format = pic.format || 'image/jpeg';
+    return `data:${format};base64,${data}`;
   }
 
   handlePlaybackEnd() {
@@ -517,8 +550,7 @@ export class Renderer {
       });
       li.addEventListener('click', () => {
         this.audioManager.playTrack(index);
-        this.playIcon.classList.add('hidden');
-        this.pauseIcon.classList.remove('hidden');
+        this.syncPlaybackUi(true);
       });
       // Right-click context menu for queue actions
       li.addEventListener('contextmenu', (e) => {
@@ -643,16 +675,15 @@ export class Renderer {
     const vizRow = document.createElement('div'); vizRow.className = 'menu-row';
     const vizLbl = document.createElement('span'); vizLbl.textContent = 'Visualization Mode';
     const vizSelect = document.createElement('select');
-    ;['orb','bars','wave','spectrogram','particles','video'].forEach(m => {
+    ;['orb','bars','wave','spectrogram','particles','cover','video'].forEach(m => {
       const opt = document.createElement('option'); opt.value = m; opt.textContent = m[0].toUpperCase() + m.slice(1);
-      if ((localStorage.getItem('vizMode') || 'orb') === m) opt.selected = true;
+      if (this.getVizMode() === m) opt.selected = true;
       vizSelect.appendChild(opt);
     });
     vizSelect.addEventListener('change', (e) => {
-      const m = e.target.value;
+      const m = this.setVizMode(e.target.value);
       if (m !== 'video' && this.visualizer.setMode) this.visualizer.setMode(m);
       if (m !== 'video') this.prevNonVideoMode = m;
-      localStorage.setItem('vizMode', m);
       this.updateVisualizationUi(m);
       this.updateVideoModeUi();
     });
@@ -756,6 +787,7 @@ export class Renderer {
     this.queueNameInput.value = '';
     this.queueSaveModal.classList.remove('hidden');
     this.queueSaveModal.classList.remove('closing');
+    this.queueSaveModal.setAttribute('aria-hidden', 'false');
     this.queueNameInput.focus();
   }
   initQueueSaveUi() {
@@ -775,6 +807,7 @@ export class Renderer {
     const onEnd = () => {
       this.queueSaveModal.classList.add('hidden');
       this.queueSaveModal.classList.remove('closing');
+      this.queueSaveModal.setAttribute('aria-hidden', 'true');
       this.queueSaveModal.removeEventListener('animationend', onEnd, true);
     };
     this.queueSaveModal.addEventListener('animationend', onEnd, true);
@@ -954,9 +987,21 @@ export class Renderer {
   showQueueContextMenu(e, index) {
     const ctx = this.ensureQueueContextMenu();
     const { el, optPlay, optPlayNext, optReveal, optRemove, optEdit } = ctx;
-    el.style.left = `${e.clientX}px`;
-    el.style.top = `${e.clientY}px`;
+    const left = Number(e.clientX) || 0;
+    const top = Number(e.clientY) || 0;
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
     el.classList.remove('hidden');
+    if (typeof window !== 'undefined' && typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        const rect = el.getBoundingClientRect();
+        const margin = 8;
+        const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+        const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+        el.style.left = `${Math.min(Math.max(margin, left), maxLeft)}px`;
+        el.style.top = `${Math.min(Math.max(margin, top), maxTop)}px`;
+      });
+    }
     const off = () => this.hideQueueContextMenu();
     optPlay.onclick = () => { this.audioManager.playTrack(index); off(); };
     optPlayNext.onclick = () => { this.audioManager.moveTrackToNext(index); off(); };
@@ -1021,6 +1066,7 @@ export class Renderer {
     // Show with animation
     this.metaModal.classList.remove('hidden');
     this.metaModal.classList.remove('closing');
+    this.metaModal.setAttribute('aria-hidden', 'false');
     void this.metaModal.offsetWidth; // reflow to restart animation
   }
 
@@ -1030,6 +1076,7 @@ export class Renderer {
     const onEnd = () => {
       this.metaModal.classList.add('hidden');
       this.metaModal.classList.remove('closing');
+      this.metaModal.setAttribute('aria-hidden', 'true');
       this.metaModal.removeEventListener('animationend', onEnd, true);
     };
     this.metaModal.addEventListener('animationend', onEnd, true);
@@ -1087,12 +1134,12 @@ export class Renderer {
 
   // Visualization controls
   cycleVisualization() {
-    const order = ['orb', 'bars', 'wave', 'spectrogram', 'particles', 'video'];
-    const current = localStorage.getItem('vizMode') || 'orb';
+    const order = ['orb', 'bars', 'wave', 'spectrogram', 'particles', 'cover', 'video'];
+    const current = this.getVizMode();
     const next = order[(order.indexOf(current) + 1) % order.length];
     if (next !== 'video' && this.visualizer.setMode) this.visualizer.setMode(next);
     if (next !== 'video') this.prevNonVideoMode = next;
-    localStorage.setItem('vizMode', next);
+    this.setVizMode(next);
     this.updateVisualizationUi(next);
     this.updateVideoModeUi();
     this.initVideoOverlayHandlers();
@@ -1100,12 +1147,13 @@ export class Renderer {
 
   updateVisualizationUi(mode) {
     if (!this.visualModeBtn) return;
-    const m = mode || localStorage.getItem('vizMode') || 'orb';
+    const m = mode || this.getVizMode();
     const label = (
       m === 'bars' ? 'Bars' :
       m === 'wave' ? 'Wave' :
       m === 'spectrogram' ? 'Spectrogram' :
       m === 'particles' ? 'Particles' :
+      m === 'cover' ? 'Cover' :
       m === 'video' ? 'Video' : 'Orb'
     );
     this.visualModeBtn.title = `Visualization: ${label} (click to change)`;
@@ -1124,17 +1172,17 @@ export class Renderer {
     modeLabel.style.marginRight = '8px';
     const modeSelect = document.createElement('select');
     modeSelect.id = 'viz-mode-select';
-    ['orb','bars','wave','spectrogram','particles','video'].forEach(m => {
+    modeLabel.setAttribute('for', modeSelect.id);
+    ['orb','bars','wave','spectrogram','particles','cover','video'].forEach(m => {
       const opt = document.createElement('option');
       opt.value = m; opt.textContent = m[0].toUpperCase() + m.slice(1);
-      if ((localStorage.getItem('vizMode') || 'orb') === m) opt.selected = true;
+      if (this.getVizMode() === m) opt.selected = true;
       modeSelect.appendChild(opt);
     });
     modeSelect.addEventListener('change', (e) => {
-      const m = e.target.value;
+      const m = this.setVizMode(e.target.value);
       if (m !== 'video' && this.visualizer.setMode) this.visualizer.setMode(m);
       if (m !== 'video') this.prevNonVideoMode = m;
-      localStorage.setItem('vizMode', m);
       this.updateVisualizationUi(m);
       this.updateVideoModeUi();
     });
@@ -1150,6 +1198,7 @@ export class Renderer {
     themeLabel.style.marginRight = '8px';
     const themeSelect = document.createElement('select');
     themeSelect.id = 'viz-theme-select';
+    themeLabel.setAttribute('for', themeSelect.id);
     ['neon','sunset','aurora','ocean','mono'].forEach(t => {
       const opt = document.createElement('option');
       opt.value = t; opt.textContent = t[0].toUpperCase() + t.slice(1);
@@ -1166,6 +1215,7 @@ export class Renderer {
     el.appendChild(themeRow);
 
     // Per-mode controls
+    let vizControlIndex = 0;
     const addSlider = (labelText, min, max, step, value, onInput) => {
       const row = document.createElement('div');
       row.style.marginTop = '8px';
@@ -1174,6 +1224,9 @@ export class Renderer {
       label.style.marginRight = '8px';
       const input = document.createElement('input');
       input.type = 'range'; input.min = String(min); input.max = String(max); input.step = String(step); input.value = String(value);
+      input.id = `viz-control-${vizControlIndex++}`;
+      input.setAttribute('aria-label', `${labelText} setting`);
+      label.setAttribute('for', input.id);
       input.addEventListener('input', (e) => onInput(Number(e.target.value)));
       row.appendChild(label);
       row.appendChild(input);
@@ -1218,24 +1271,74 @@ export class Renderer {
 
   // Animation Loop
   update() {
-    const mode = localStorage.getItem('vizMode') || 'orb';
+    const mode = this.getVizMode();
     const usingCanvas = mode !== 'video';
-    if (this.audioManager.isPlaying && usingCanvas) {
+    const src = this.audioManager.getCurrentSource();
+    const duration = Number(src?.duration);
+    const hasMedia = Number.isFinite(duration) && duration > 0;
+    const isPlaying = !!(src && hasMedia && !src.paused);
+    if (isPlaying && usingCanvas) {
       this.visualizer.draw();
-      this.updateProgressBar();
     }
+    if (hasMedia) this.updateProgressBar();
     this.updateDiagnostics(); // refresh diagnostic overlay if visible
-    requestAnimationFrame(this.update.bind(this));
+    requestAnimationFrame(this._updateLoop);
+  }
+
+  isEditableTarget(target) {
+    if (!target) return false;
+    if (target.isContentEditable) return true;
+    const tag = target.tagName ? target.tagName.toLowerCase() : '';
+    if (tag === 'textarea' || tag === 'select') return true;
+    if (tag === 'input') {
+      const type = (target.type || '').toLowerCase();
+      return type !== 'button' && type !== 'submit' && type !== 'reset';
+    }
+    return false;
+  }
+
+  initErrorHandling() {
+    if (this._errorHandlersInit) return;
+    this._errorHandlersInit = true;
+    if (this.errorBannerClose) {
+      this.errorBannerClose.addEventListener('click', () => this.hideErrorBanner());
+    }
+    window.addEventListener('error', (event) => {
+      const msg = event?.message ? `Unexpected error: ${event.message}` : 'Unexpected error';
+      this.showErrorBanner(msg);
+      console.error('[Renderer Error]', event?.error || event);
+    });
+    window.addEventListener('unhandledrejection', (event) => {
+      const reason = event?.reason;
+      const msg = reason instanceof Error ? reason.message : String(reason || 'Unhandled rejection');
+      this.showErrorBanner(`Unhandled promise rejection: ${msg}`);
+      console.error('[Renderer Rejection]', reason);
+    });
+  }
+
+  showErrorBanner(message) {
+    if (!this.errorBanner || !this.errorBannerMessage) {
+      console.error('[Renderer Error Banner]', message);
+      return;
+    }
+    this.errorBannerMessage.textContent = message;
+    this.errorBanner.classList.remove('hidden');
+  }
+
+  hideErrorBanner() {
+    if (!this.errorBanner) return;
+    this.errorBanner.classList.add('hidden');
   }
 
   // UI fallbacks for non-browser test environments (e.g., jsdom)
   safeAlert(message) {
     // Avoid calling browser dialogs under test (jsdom), only call inside Electron
     const inElectron = typeof process !== 'undefined' && process.versions && process.versions.electron;
+    const inTest = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
     if (inElectron && typeof window !== 'undefined' && typeof window.alert === 'function') {
       try { window.alert(message); return; } catch { /* fall through */ }
     }
-    console.warn('[Alert]', message);
+    if (!inTest) console.warn('[Alert]', message);
   }
 
   safeConfirm(message, fallback = false) {
@@ -1287,7 +1390,7 @@ export class Renderer {
         e.stopPropagation();
         const restore = this.prevNonVideoMode || 'orb';
         if (this.visualizer.setMode) this.visualizer.setMode(restore);
-        localStorage.setItem('vizMode', restore);
+        this.setVizMode(restore);
         this.updateVisualizationUi(restore);
         this.updateVideoModeUi();
       });
@@ -1427,7 +1530,7 @@ export class Renderer {
   // Video mode: attach current track's video element when selected and available
   updateVideoModeUi() {
     try {
-      const mode = localStorage.getItem('vizMode') || 'orb';
+      const mode = this.getVizMode();
       const isVideoMode = mode === 'video';
       const track = this.audioManager.getCurrentTrack && this.audioManager.getCurrentTrack();
       const isVideoTrack = !!(track && track.isVideo && track.audio && track.audio.tagName === 'VIDEO');
@@ -1480,6 +1583,16 @@ export class Renderer {
     const minutes = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
+  }
+
+  syncPlaybackUi(isPlaying) {
+    if (!this.playIcon || !this.pauseIcon) return;
+    this.playIcon.classList.toggle('hidden', isPlaying);
+    this.pauseIcon.classList.toggle('hidden', !isPlaying);
+    if (this.videoPlayIcon && this.videoPauseIcon) {
+      this.videoPlayIcon.classList.toggle('hidden', isPlaying);
+      this.videoPauseIcon.classList.toggle('hidden', !isPlaying);
+    }
   }
 }
 
