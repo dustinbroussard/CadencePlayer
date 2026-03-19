@@ -1,6 +1,11 @@
 import { AudioManager } from './audio-manager.js';
 import { Visualizer } from './visualizer.js';
 import { ChordDetector } from './chord-detector.js';
+import { safeAlert, safeConfirm, safePrompt } from './ui/utils.js';
+import { BUILTIN_EQ_PRESETS, getCustomEqPresets, setCustomEqPresets } from './ui/eq-presets.js';
+import { getSavedQueues, setSavedQueues } from './ui/queue-storage.js';
+import { getChordColors } from './ui/chord-colors.js';
+
 
 // Exported so tests can instantiate and exercise behaviour without relying on
 // the global DOMContentLoaded hook at the bottom of the file.
@@ -122,7 +127,7 @@ export class Renderer {
         const conf = Math.round(confidence * 100);
         this.chordReadout.textContent = `${name}  ·  ${conf}%`;
 
-        const { fg, bg } = this.getChordColors(name);
+        const { fg, bg } = getChordColors(name);
         const greenThresh = Math.round(this.chordDetector.confEnter * 100);
         this.chordReadout.style.color = conf >= greenThresh ? fg : '';
         this.chordReadout.style.background = bg;
@@ -153,18 +158,7 @@ export class Renderer {
     } catch { /* ignore */ }
   }
 
-  getChordColors(name) {
-    const quality = name.replace(/^[A-G]#?/, '');
-    if (quality.includes('dim')) return { fg: '#f87171', bg: 'rgba(248,113,113,0.15)' };
-    if (quality.includes('aug')) return { fg: '#fbbf24', bg: 'rgba(251,191,36,0.15)' };
-    if (quality.startsWith('m') && !quality.startsWith('maj')) return { fg: '#60a5fa', bg: 'rgba(96,165,250,0.15)' };
-    if (quality.includes('sus')) return { fg: '#c084fc', bg: 'rgba(192,132,252,0.15)' };
-    if (quality.includes('6')) return { fg: '#34d399', bg: 'rgba(52,211,153,0.15)' };
-    if (quality.includes('7') || quality.includes('9') || quality.includes('11') || quality.includes('13'))
-      return { fg: '#fbbf24', bg: 'rgba(251,191,36,0.15)' };
-    if (quality.includes('5')) return { fg: '#a1a1aa', bg: 'rgba(161,161,170,0.15)' };
-    return { fg: '#4ade80', bg: 'rgba(74,222,128,0.15)' }; // major/default
-  }
+
 
   // Start detector only when audio context is running and audio is flowing
   startChordDetectorWhenReady() {
@@ -576,7 +570,7 @@ export class Renderer {
     } catch { /* ignore */ }
     const openMenu = (e) => {
       // Avoid default to prevent interference with drag, but no need to fully preventDefault
-      try { e.stopPropagation(); } catch (err) { void err; }
+      try { e.stopPropagation(); } catch (_) { /* ignore */ }
       this.buildAppMenu();
       this.positionAppMenu();
       this.showAppMenu();
@@ -640,9 +634,9 @@ export class Renderer {
     const eqPresetRow = document.createElement('div'); eqPresetRow.className = 'menu-row';
     const eqPresetLbl = document.createElement('span'); eqPresetLbl.textContent = 'EQ Preset';
     const eqPresetSelect = document.createElement('select');
-    const builtins = this.getBuiltinEqPresets();
+    const builtins = BUILTIN_EQ_PRESETS;
     Object.keys(builtins).forEach(n => { const o = document.createElement('option'); o.value = `builtin:${n}`; o.textContent = n; eqPresetSelect.appendChild(o); });
-    const custom = this.getCustomEqPresets();
+    const custom = getCustomEqPresets();
     Object.keys(custom).forEach(n => { const o = document.createElement('option'); o.value = `custom:${n}`; o.textContent = n; eqPresetSelect.appendChild(o); });
     eqPresetSelect.addEventListener('change', (e) => {
       const v = e.target.value || '';
@@ -740,7 +734,7 @@ export class Renderer {
 
     // Saved Queues
     addItem('Save Queue As…', () => this.openQueueSaveModal());
-    const saved = this.getSavedQueues();
+    const saved = getSavedQueues();
     if (Object.keys(saved).length) {
       const loadRow = document.createElement('div'); loadRow.className = 'menu-row';
       const loadLbl = document.createElement('span'); loadLbl.textContent = 'Load Queue';
@@ -767,19 +761,14 @@ export class Renderer {
   }
 
   // Saved queues
-  getSavedQueues() {
-    try { return JSON.parse(localStorage.getItem('savedQueues') || '{}') || {}; } catch { return {}; }
-  }
-  setSavedQueues(obj) {
-    localStorage.setItem('savedQueues', JSON.stringify(obj || {}));
-  }
+
   saveQueueAs() {
-    const name = this.safePrompt('Save queue as:', '');
+    const name = safePrompt('Save queue as:', '');
     if (!name) return;
     const q = this.audioManager.getQueue().map(t => ({ path: t.path, name: t.name }));
-    const all = this.getSavedQueues();
+    const all = getSavedQueues();
     all[name] = { items: q, savedAt: Date.now() };
-    this.setSavedQueues(all);
+    setSavedQueues(all);
   }
 
   openQueueSaveModal() {
@@ -815,18 +804,18 @@ export class Renderer {
   saveQueueFromModal() {
     const name = (this.queueNameInput?.value || '').trim();
     if (!name) return;
-    const all = this.getSavedQueues();
+    const all = getSavedQueues();
     if (all[name]) {
-      const overwrite = this.safeConfirm(`A queue named "${name}" already exists. Overwrite?`, false);
+      const overwrite = safeConfirm(`A queue named "${name}" already exists. Overwrite?`, false);
       if (!overwrite) return;
     }
     const q = this.audioManager.getQueue().map(t => ({ path: t.path, name: t.name }));
     all[name] = { items: q, savedAt: Date.now() };
-    this.setSavedQueues(all);
+    setSavedQueues(all);
     this.closeQueueSaveModal();
   }
   async loadQueueByName(name) {
-    const all = this.getSavedQueues();
+    const all = getSavedQueues();
     const entry = all[name];
     if (!entry || !Array.isArray(entry.items)) return;
     const paths = entry.items.map(i => i.path);
@@ -836,7 +825,7 @@ export class Renderer {
     const present = entry.items.filter((_, i) => exists[i]);
     const missing = entry.items.filter((_, i) => !exists[i]);
     if (missing.length) {
-      this.safeAlert(`Some files could not be found and were skipped:\n\n` + missing.map(m => `• ${m.name}`).join('\n'));
+      safeAlert(`Some files could not be found and were skipped:\n\n` + missing.map(m => `• ${m.name}`).join('\n'));
     }
     this.audioManager.clearQueue();
     if (present.length) {
@@ -845,9 +834,9 @@ export class Renderer {
     }
   }
   deleteSavedQueue(name) {
-    const all = this.getSavedQueues();
+    const all = getSavedQueues();
     delete all[name];
-    this.setSavedQueues(all);
+    setSavedQueues(all);
   }
 
   // EQ and visualizer
@@ -894,29 +883,17 @@ export class Renderer {
   }
 
   // EQ Presets helpers
-  getBuiltinEqPresets() {
-    return {
-      'Flat': [0, 0, 0, 0, 0],
-      'Bass Boost': [6, 4, 0, -2, -2],
-      'Vocal Boost': [-2, -1, 4, 3, 1]
-    };
-  }
-  getCustomEqPresets() {
-    try { return JSON.parse(localStorage.getItem('eqPresets') || '{}') || {}; } catch { return {}; }
-  }
-  setCustomEqPresets(obj) {
-    localStorage.setItem('eqPresets', JSON.stringify(obj || {}));
-  }
+
   saveCustomEqPreset(name) {
     const gains = this.getCurrentEqGains();
-    const all = this.getCustomEqPresets();
+    const all = getCustomEqPresets();
     all[name] = gains;
-    this.setCustomEqPresets(all);
+    setCustomEqPresets(all);
   }
   deleteCustomEqPreset(name) {
-    const all = this.getCustomEqPresets();
+    const all = getCustomEqPresets();
     delete all[name];
-    this.setCustomEqPresets(all);
+    setCustomEqPresets(all);
   }
   getCurrentEqGains() {
     try { return this.audioManager.getFilters().map(f => Number(f.gain.value) || 0); } catch { return []; }
@@ -1331,31 +1308,7 @@ export class Renderer {
   }
 
   // UI fallbacks for non-browser test environments (e.g., jsdom)
-  safeAlert(message) {
-    // Avoid calling browser dialogs under test (jsdom), only call inside Electron
-    const inElectron = typeof process !== 'undefined' && process.versions && process.versions.electron;
-    const inTest = typeof process !== 'undefined' && process.env && process.env.NODE_ENV === 'test';
-    if (inElectron && typeof window !== 'undefined' && typeof window.alert === 'function') {
-      try { window.alert(message); return; } catch { /* fall through */ }
-    }
-    if (!inTest) console.warn('[Alert]', message);
-  }
 
-  safeConfirm(message, fallback = false) {
-    const inElectron = typeof process !== 'undefined' && process.versions && process.versions.electron;
-    if (inElectron && typeof window !== 'undefined' && typeof window.confirm === 'function') {
-      try { return window.confirm(message); } catch { /* ignore */ }
-    }
-    return fallback;
-  }
-
-  safePrompt(message, fallback = '') {
-    const inElectron = typeof process !== 'undefined' && process.versions && process.versions.electron;
-    if (inElectron && typeof window !== 'undefined' && typeof window.prompt === 'function') {
-      try { return window.prompt(message); } catch { /* ignore */ }
-    }
-    return fallback;
-  }
 
   // Initialize video overlay events on first run
   initVideoOverlayHandlers() {

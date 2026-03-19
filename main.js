@@ -27,11 +27,10 @@ function createWindow() {
     height: 800,
     minWidth: 800,
     minHeight: 600,
-    show: false, // Don't show until ready
-    frame: false, // Custom title bar
-    titleBarStyle: 'hidden', // Hide title bar on macOS
+    show: false,
+    frame: false,
+    titleBarStyle: 'hidden',
     icon: path.join(__dirname, 'assets', 'icon.png'),
-    // Prevent white flash while loading renderer
     backgroundColor: '#000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -42,7 +41,19 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadFile(path.join(__dirname, 'index.html'));
+  const isDev = process.env.NODE_ENV === 'development';
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:3000').catch(() => {
+      // Fallback if dev server is not ready yet
+      setTimeout(() => mainWindow.loadURL('http://localhost:3000'), 1000);
+    });
+    mainWindow.webContents.openDevTools();
+  } else {
+    mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html')).catch(() => {
+      // Fallback to root for legacy or single-executable cases
+      mainWindow.loadFile(path.join(__dirname, 'index.html'));
+    });
+  }
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
@@ -51,11 +62,8 @@ function createWindow() {
   // Harden navigation: deny window.open and external navigation
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (e) => e.preventDefault());
-
-  if (process.env.NODE_ENV === 'development') {
-    mainWindow.webContents.openDevTools();
-  }
 }
+
 
 function setAppMenu() {
   app.setAboutPanelOptions?.({
