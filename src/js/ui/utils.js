@@ -2,18 +2,22 @@
  * UI Utilities and wrappers for browser-specific functions
  */
 
+const isJsdom = () => /\bjsdom\b/i.test(globalThis.navigator?.userAgent || '');
+
 export const safeAlert = (msg) => {
   try {
+    if (isJsdom()) throw new Error('Dialog not supported in jsdom');
     alert(msg);
-  } catch (_) {
-    console.log('[Alert Fallback]:', msg);
+  } catch {
+    if (!isJsdom()) console.log('[Alert Fallback]:', msg);
   }
 };
 
 export const safeConfirm = (msg) => {
   try {
+    if (isJsdom()) throw new Error('Dialog not supported in jsdom');
     return confirm(msg);
-  } catch (_) {
+  } catch {
     // In headless environments, default to OK
     return true;
   }
@@ -21,8 +25,9 @@ export const safeConfirm = (msg) => {
 
 export const safePrompt = (msg, def = '') => {
   try {
+    if (isJsdom()) throw new Error('Dialog not supported in jsdom');
     return prompt(msg, def);
-  } catch (_) {
+  } catch {
     return def;
   }
 };
@@ -36,7 +41,7 @@ export const throttle = (func, limit) => {
     if (!inThrottle) {
       func.apply(this, args);
       inThrottle = true;
-      setTimeout(() => inThrottle = false, limit);
+      setTimeout(() => { inThrottle = false; }, limit);
     }
   };
 };

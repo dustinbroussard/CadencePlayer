@@ -1,6 +1,7 @@
 import { AudioManager } from './audio-manager.js';
 import { Visualizer } from './visualizer.js';
 import { ChordDetector } from './chord-detector.js';
+import { applyChordModePreset } from './chord-mode-presets.js';
 import { safeAlert, safeConfirm, safePrompt } from './ui/utils.js';
 import { BUILTIN_EQ_PRESETS, getCustomEqPresets, setCustomEqPresets } from './ui/eq-presets.js';
 import { getSavedQueues, setSavedQueues } from './ui/queue-storage.js';
@@ -94,6 +95,8 @@ export class Renderer {
     this.detectorRunning = false; // ensures detector starts only once per track
     this.chordsEnabled = true;
     this.chordMode = 'lowcpu'; // 'responsive' | 'normal' | 'accurate' | 'lowcpu'
+    this.chordPulseTimeout = null;
+    this.pendingDetectorStartRaf = null;
     // Avoid allocating a new bound function on every animation frame
     this._updateLoop = this.update.bind(this);
 
@@ -135,7 +138,11 @@ export class Renderer {
 
         this.chordReadout.classList.remove('dim');
         this.chordReadout.classList.add('pulse');
-        setTimeout(() => this.chordReadout && this.chordReadout.classList.remove('pulse'), 120);
+        if (this.chordPulseTimeout) clearTimeout(this.chordPulseTimeout);
+        this.chordPulseTimeout = setTimeout(() => {
+          if (this.chordReadout) this.chordReadout.classList.remove('pulse');
+          this.chordPulseTimeout = null;
+        }, 120);
       }
     });
     this.applyChordMode(this.chordMode);
@@ -163,8 +170,10 @@ export class Renderer {
   // Start detector only when audio context is running and audio is flowing
   startChordDetectorWhenReady() {
     if (this.detectorRunning) return; // prevent multiple loops
+    if (this.pendingDetectorStartRaf) return;
     let lastTime = 0;
     const tryStart = () => {
+      this.pendingDetectorStartRaf = null;
       const ctx = this.audioManager.ctx;
       const src = this.audioManager.getCurrentSource();
       const running = ctx && ctx.state === 'running';
@@ -175,9 +184,15 @@ export class Renderer {
         this.detectorRunning = true;
         return;
       }
-      if (this.chordsEnabled && !this.detectorRunning) requestAnimationFrame(tryStart);
+      if (this.chordsEnabled && !this.detectorRunning) {
+        this.pendingDetectorStartRaf = requestAnimationFrame(tryStart);
+      }
     };
     tryStart();
+  }
+
+  getChordColors(name) {
+    return getChordColors(name);
   }
 
   // Load persisted preferences for dark mode, volume and chord options.
@@ -570,7 +585,7 @@ export class Renderer {
     } catch { /* ignore */ }
     const openMenu = (e) => {
       // Avoid default to prevent interference with drag, but no need to fully preventDefault
-      try { e.stopPropagation(); } catch (_) { /* ignore */ }
+      try { e.stopPropagation(); } catch { /* ignore */ }
       this.buildAppMenu();
       this.positionAppMenu();
       this.showAppMenu();
@@ -1390,72 +1405,10 @@ export class Renderer {
   }
 
   applyChordMode(mode) {
-    // Adjust detector parameters live for different UX tradeoffs
-    const d = this.chordDetector;
-    if (!d) return;
-    if (mode === 'lowcpu') {
-      // Tune for low-powered devices
-      d.confEnter = 0.35;
-      d.confExit = 0.28;
-      d.holdMsEnter = 450;
-      d.holdMsExit = 250;
-      d.requiredStableFrames = 1;
-      d.chromaAlphaFast = 0.4;
-      d.chromaAlphaSlow = 0.2;
-      d.harmonicThreshold = 0.1;
-      d.rmsGate = 0.005;
-      d.minSpectralClarity = 0.0;
-      d.enableHarmonicAnalysis = false; // fewer analysis passes
-      d.disableEnergyGate = true; // never gate on low total energy
-      d.maxFps = 25; // throttle detector loop
-      d.chromaSigmaCents = 45; // wider buckets for robustness
-      // Reduce FFT size to lower CPU
-      this.audioManager.setChordFftSize(8192);
-      // Throttle visualizer slightly
-      this.visualizer.fpsCap = 30;
-    } else if (mode === 'responsive') {
-      d.confEnter = 0.35;
-      d.confExit = 0.28;
-      d.holdMsEnter = 300;
-      d.holdMsExit = 200;
-      d.requiredStableFrames = 1;
-      d.chromaAlphaFast = 0.5;
-      d.chromaAlphaSlow = 0.12;
-      d.harmonicThreshold = 0.12;
-      d.enableHarmonicAnalysis = true;
-      d.maxFps = 45;
-      d.chromaSigmaCents = 40;
-      this.audioManager.setChordFftSize(16384);
-      this.visualizer.fpsCap = 45;
-    } else if (mode === 'accurate') {
-      d.confEnter = 0.52;
-      d.confExit = 0.42;
-      d.holdMsEnter = 700;
-      d.holdMsExit = 350;
-      d.requiredStableFrames = 3;
-      d.chromaAlphaFast = 0.35;
-      d.chromaAlphaSlow = 0.18;
-      d.harmonicThreshold = 0.15;
-      d.enableHarmonicAnalysis = true;
-      d.maxFps = 60;
-      d.chromaSigmaCents = 30; // tighter mapping for precision
-      this.audioManager.setChordFftSize(32768);
-      this.visualizer.fpsCap = 60;
-    } else { // normal
-      d.confEnter = 0.4;
-      d.confExit = 0.32;
-      d.holdMsEnter = 500;
-      d.holdMsExit = 250;
-      d.requiredStableFrames = 2;
-      d.chromaAlphaFast = 0.4;
-      d.chromaAlphaSlow = 0.15;
-      d.harmonicThreshold = 0.15;
-      d.enableHarmonicAnalysis = true;
-      d.maxFps = 40;
-      d.chromaSigmaCents = 35;
-      this.audioManager.setChordFftSize(16384);
-      this.visualizer.fpsCap = 40;
-    }
+    applyChordModePreset(this.chordDetector, mode, {
+      setChordFftSize: (fftSize) => this.audioManager.setChordFftSize(fftSize),
+      setVisualizerFpsCap: (fpsCap) => { this.visualizer.fpsCap = fpsCap; }
+    });
   }
 
   updateChordToggleUi() {

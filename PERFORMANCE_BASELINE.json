@@ -1,0 +1,62 @@
+{
+  "captured_at": "2026-03-19T18:55:33-05:00",
+  "project": "cadence-player-enhanced",
+  "summary": {
+    "health_score": 78,
+    "test_files": 7,
+    "tests_passed": 15,
+    "lint_status": "pass",
+    "npm_audit_vulnerabilities": 0
+  },
+  "build": {
+    "command": "npm run build",
+    "duration_ms": 341,
+    "artifacts": {
+      "index_html_bytes": 10235,
+      "main_css_bytes": 16274,
+      "main_js_bytes": 79856
+    }
+  },
+  "tests": {
+    "command": "npm test",
+    "duration_ms": 1440
+  },
+  "static_analysis": {
+    "command": "npm run lint",
+    "warnings": 0,
+    "errors": 0
+  },
+  "codebase": {
+    "total_lines_reported": 5695,
+    "largest_files": [
+      {
+        "path": "src/js/renderer.js",
+        "lines": 1562
+      },
+      {
+        "path": "src/js/chord-detector.js",
+        "lines": 1073
+      },
+      {
+        "path": "src/css/styles.css",
+        "lines": 897
+      }
+    ]
+  },
+  "chord_detection": {
+    "engine_file": "src/js/chord-detector.js",
+    "test_file": "test/chord-detector.test.js",
+    "known_strengths": [
+      "dedicated analyser",
+      "mode-based FFT tuning",
+      "RMS gating",
+      "diagnostics overlay",
+      "immediate config refresh after mode changes"
+    ],
+    "known_gaps": [
+      "no real-audio benchmark corpus",
+      "no precision/recall baseline",
+      "large heuristic surface area"
+    ]
+  }
+}

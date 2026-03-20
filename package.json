@@ -11,9 +11,11 @@
     "build": "vite build",
     "dist": "npm run build && electron-builder",
     "test": "vitest run",
+    "test:chords": "vitest run test/chord-detector-fixtures.test.js test/chord-detector.test.js",
     "lint": "eslint . --ext .js",
     "lint:fix": "eslint . --ext .js --fix",
     "format": "prettier -w .",
+    "benchmark:chords": "node --experimental-default-type=module scripts/benchmark-chords.mjs",
     "ci": "npm run lint && npm test"
   },
   "keywords": [

@@ -27,6 +27,16 @@ module.exports = [
     },
   },
   {
+    files: ['scripts/**/*.mjs', 'vite.config.mjs'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
+  {
     files: ['main.js', 'preload.js'],
     languageOptions: {
       sourceType: 'script',

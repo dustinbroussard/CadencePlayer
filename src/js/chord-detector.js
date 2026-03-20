@@ -72,6 +72,7 @@ export class ChordDetector {
     
     // State tracking
     this.lastChord = null;
+    this.lastConfidence = 0;
     this.lastChangeTime = 0;
     this.stableChordCount = 0;
     this.chordConfidenceHistory = [];
@@ -100,6 +101,15 @@ export class ChordDetector {
   }
 
   setOnChord(cb) { this.onChord = cb; }
+
+  refreshAnalysisConfig({ resetHistory = false } = {}) {
+    this._rebuildChromaMap();
+    if (resetHistory) {
+      this.detectionHistory = [];
+      this.chordConfidenceHistory = [];
+      this.stableChordCount = 0;
+    }
+  }
   
   start() {
     if (this._started) return;
@@ -214,13 +224,23 @@ export class ChordDetector {
     const chordName = detection.inversion ? 
       `${this._pcToName(detection.root)}${detection.quality}/${this._pcToName(detection.bass)}` :
       `${this._pcToName(detection.root)}${detection.quality}`;
+    const shouldSuppressRelabel =
+      this.lastChord &&
+      chordName !== this.lastChord &&
+      this._shareChordRoot(chordName, this.lastChord) &&
+      this._qualityComplexity(detection.quality) > this._qualityComplexity(this._qualityFromChordName(this.lastChord)) &&
+      detection.confidence + 0.12 < this.lastConfidence;
+
+    if (shouldSuppressRelabel) {
+      return;
+    }
 
     if (chordName !== this.lastChord) {
       if (enterOK) {
         this.stableChordCount++;
         const requiredFrames = this._getAdaptiveStableFrames(detection);
         if (this.stableChordCount >= requiredFrames &&
-            (now - this.lastChangeTime) > this.holdMsEnter) {
+            (now - this.lastChangeTime) >= this.holdMsEnter) {
           this._setCurrentChord(chordName, detection.confidence, detection);
         }
       } else {
@@ -579,9 +599,10 @@ export class ChordDetector {
         const dotScore = this._dot(chroma, rotated);
         const cosineScore = this._cosineScore(chroma, rotated);
         const harmonicScore = this._harmonicScore(chroma, rotated, root);
+        const rootSupportScore = this._rootSupportScore(chroma, root, template);
         
         // Weighted combination
-        const combinedScore = dotScore * 0.4 + cosineScore * 0.4 + harmonicScore * 0.2;
+        const combinedScore = dotScore * 0.34 + cosineScore * 0.34 + harmonicScore * 0.16 + rootSupportScore * 0.16;
         
         if (combinedScore > bestScore) {
           bestScore = combinedScore;
@@ -684,54 +705,87 @@ export class ChordDetector {
     return totalEnergy > 0 ? harmonicEnergy / totalEnergy : 0;
   }
 
+  _rootSupportScore(chroma, root, templateObj) {
+    const rootEnergy = chroma[root] || 0;
+    const fifthEnergy = chroma[(root + 7) % 12] || 0;
+    const majorThird = chroma[(root + 4) % 12] || 0;
+    const minorThird = chroma[(root + 3) % 12] || 0;
+    const sus2 = chroma[(root + 2) % 12] || 0;
+    const sus4 = chroma[(root + 5) % 12] || 0;
+    const activeThird = Math.max(majorThird, minorThird);
+    let score = rootEnergy * 0.7 + fifthEnergy * 0.3;
+
+    if (templateObj.category === 'power') {
+      if (activeThird < 0.3) score += Math.min(rootEnergy, fifthEnergy) * 0.45;
+      else score -= activeThird * 0.2;
+    }
+
+    if (templateObj.category === 'suspended') {
+      const suspendedTone = templateObj.suffix === 'sus2' ? sus2 : sus4;
+      if (activeThird < suspendedTone) score += suspendedTone * 0.35;
+      else score -= activeThird * 0.18;
+    }
+
+    return Math.max(0, Math.min(1.5, score));
+  }
+
   _detectAdvancedExtensions(chroma, detection) {
     const { root, quality } = detection;
+    if (quality.includes('sus') || quality === '5' || quality.includes('dim') || quality.includes('aug')) {
+      return detection;
+    }
+    const allowComplexPromotion =
+      detection.confidence >= 0.45 ||
+      quality.includes('7') ||
+      quality.includes('6');
     
     // Enhanced extension detection for various chord types
     const extensions = this._analyzeExtensions(chroma, root, quality);
-    
-    if (extensions.maj7 > extensions.dom7 && extensions.maj7 > 0.4) {
-      let newQuality = quality.startsWith('m') ? 'mMaj7' : 'Maj7';
+    const dominantFlavor = extensions.dom7 + Math.max(extensions.ninth, extensions.eleventh, extensions.thirteenth) * 0.35;
+    const majorSevenThreshold = quality.startsWith('m') ? 0.84 : 0.72;
 
-      if (extensions.ninth > 0.35) {
-        newQuality = quality.startsWith('m') ? 'mMaj9' : 'Maj9';
-        if (extensions.eleventh > 0.3) {
-          newQuality = quality.startsWith('m') ? 'mMaj11' : 'Maj11';
-        }
-      }
-
-      if (extensions.thirteenth > 0.35) {
-        newQuality = quality.startsWith('m') ? 'mMaj13' : 'Maj13';
-      }
-
-      return { ...detection, quality: newQuality };
-    }
-
-    if (extensions.dom7 > 0.4) {
+    if (allowComplexPromotion && dominantFlavor > Math.max(0.6, extensions.maj7 * 0.92) && extensions.dom7Energy > 0.16) {
       let newQuality = quality.startsWith('m') ? 'm7' : '7';
 
-      if (extensions.ninth > 0.35) {
+      if (extensions.ninth > 0.52 && extensions.ninthEnergy > 0.2) {
         newQuality = quality.startsWith('m') ? 'm9' : '9';
-        if (extensions.eleventh > 0.3) {
+        if (extensions.eleventh > 0.48 && extensions.eleventhEnergy > 0.18) {
           newQuality = quality.startsWith('m') ? 'm11' : '11';
         }
       }
 
-      if (extensions.thirteenth > 0.35) {
+      if (extensions.thirteenthEnergy > Math.max(0.14, extensions.dom7Energy * 0.45)) {
         newQuality = quality.startsWith('m') ? 'm13' : '13';
       }
 
       return { ...detection, quality: newQuality };
     }
     
-    if (extensions.sixth > 0.4) {
-      if (extensions.ninth > 0.35) {
+    if (allowComplexPromotion && extensions.maj7 > extensions.dom7 * 1.2 && extensions.maj7 > majorSevenThreshold && extensions.maj7Energy > 0.28) {
+      let newQuality = quality.startsWith('m') ? 'mMaj7' : 'Maj7';
+
+      if (extensions.ninth > 0.55 && extensions.ninthEnergy > 0.22) {
+        newQuality = quality.startsWith('m') ? 'mMaj9' : 'Maj9';
+        if (extensions.eleventh > 0.5 && extensions.eleventhEnergy > 0.2) {
+          newQuality = quality.startsWith('m') ? 'mMaj11' : 'Maj11';
+        }
+      }
+
+      if (extensions.thirteenth > 0.55 && extensions.thirteenthEnergy > 0.22) {
+        newQuality = quality.startsWith('m') ? 'mMaj13' : 'Maj13';
+      }
+
+      return { ...detection, quality: newQuality };
+    }
+    
+    if (allowComplexPromotion && extensions.sixth > 0.58 && extensions.sixthEnergy > 0.22) {
+      if (extensions.ninth > 0.55 && extensions.ninthEnergy > 0.2) {
         return { ...detection, quality: quality.startsWith('m') ? 'm6/9' : '6/9' };
       }
       return { ...detection, quality: quality.startsWith('m') ? 'm6' : '6' };
     }
     
-    if (extensions.ninth > 0.4) {
+    if (allowComplexPromotion && extensions.ninth > 0.62 && extensions.ninthEnergy > 0.24) {
       return { ...detection, quality: quality.startsWith('m') ? 'madd9' : 'add9' };
     }
     
@@ -743,14 +797,27 @@ export class ChordDetector {
     const third = (root + (isMinor ? 3 : 4)) % 12;
     const fifth = (root + 7) % 12;
     const triadPeak = Math.max(chroma[root], chroma[third], chroma[fifth]);
+    const triadMean = (chroma[root] + chroma[third] + chroma[fifth]) / 3;
+    const base = Math.max(0.18, triadPeak * 0.55, triadMean);
+    const dom7Energy = chroma[(root + 10) % 12];
+    const maj7Energy = chroma[(root + 11) % 12];
+    const sixthEnergy = chroma[(root + 9) % 12];
+    const ninthEnergy = chroma[(root + 2) % 12];
+    const eleventhEnergy = chroma[(root + 5) % 12];
     
     return {
-      dom7: chroma[(root + 10) % 12] / (triadPeak + 0.1),
-      maj7: chroma[(root + 11) % 12] / (triadPeak + 0.1),
-      sixth: chroma[(root + 9) % 12] / (triadPeak + 0.1),
-      ninth: chroma[(root + 2) % 12] / (triadPeak + 0.1),
-      eleventh: chroma[(root + 5) % 12] / (triadPeak + 0.1),
-      thirteenth: chroma[(root + 9) % 12] / (triadPeak + 0.1)
+      dom7: dom7Energy / base,
+      dom7Energy,
+      maj7: maj7Energy / base,
+      maj7Energy,
+      sixth: sixthEnergy / base,
+      sixthEnergy,
+      ninth: ninthEnergy / base,
+      ninthEnergy,
+      eleventh: eleventhEnergy / base,
+      eleventhEnergy,
+      thirteenth: sixthEnergy / base,
+      thirteenthEnergy: sixthEnergy
     };
   }
 
@@ -858,6 +925,7 @@ export class ChordDetector {
 
   _setCurrentChord(name, confidence, detection) {
     this.lastChord = name;
+    this.lastConfidence = confidence;
     this.lastChangeTime = performance.now();
     this.stableChordCount = this.requiredStableFrames;
     
@@ -882,6 +950,7 @@ export class ChordDetector {
   _clearChord() {
     if (this.lastChord !== null) {
       this.lastChord = null;
+      this.lastConfidence = 0;
       this.lastChangeTime = performance.now();
       this.chordConfidenceHistory = [];
       this.stableChordCount = 0;
@@ -899,6 +968,28 @@ export class ChordDetector {
   // Utility methods
   _pcToName(pc) {
     return ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'][((pc % 12)+12)%12];
+  }
+
+  _qualityFromChordName(name) {
+    return (name || '').replace(/^[A-G]#?/, '').replace(/\/[A-G]#?$/, '');
+  }
+
+  _shareChordRoot(a, b) {
+    const rootA = /^[A-G]#?/.exec(a || '')?.[0] || null;
+    const rootB = /^[A-G]#?/.exec(b || '')?.[0] || null;
+    return rootA != null && rootA === rootB;
+  }
+
+  _qualityComplexity(quality) {
+    if (!quality) return 0;
+    let score = 0;
+    if (quality.includes('7') || quality.includes('Maj7')) score += 2;
+    if (quality.includes('9')) score += 2;
+    if (quality.includes('11') || quality.includes('13')) score += 2;
+    if (quality.includes('6')) score += 1;
+    if (quality.includes('add')) score += 1;
+    if (quality.includes('/')) score += 1;
+    return score;
   }
 
   _rotate(arr, n) {

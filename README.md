@@ -1,8 +1,5 @@
 # CadencePlayer
 
-[![CI](https://github.com/your-org/CadencePlayer/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/CadencePlayer/actions/workflows/ci.yml)
-Replace `your-org/CadencePlayer` with your actual GitHub owner/repo path to activate the badge.
-
 CadencePlayer is an Electron-based music player with a built-in visualizer and real-time chord recognition.
 
 ## What’s New
@@ -38,6 +35,8 @@ CadencePlayer is an Electron-based music player with a built-in visualizer and r
 - Run (prod): `npm start`
 - Run (dev): `npm run dev`
 - Test: `npm test` (Vitest + jsdom)
+- Chord regression tests: `npm run test:chords`
+- Chord benchmark: `npm run benchmark:chords`
 - Lint: `npm run lint` / `npm run lint:fix`
 - Format: `npm run format`
 
@@ -49,9 +48,10 @@ Chord recognition runs entirely in the renderer using WebAudio analysers; no ext
 
 ## CI
 
-This repo includes a GitHub Actions workflow that runs linting and tests on pushes and PRs. See `.github/workflows/ci.yml`.
+This repo includes a GitHub Actions workflow that runs linting, tests, and a production build on pushes and pull requests. See `.github/workflows/ci.yml`.
 
 ## Audit
 
 A detailed repository audit with findings and recommendations is available at `docs/AUDIT.md`.
 The latest debug-focused bug report is available at `docs/BUG_REPORT.md`.
+The current chord benchmark baseline is available at `docs/chord-benchmark-baseline.json`.

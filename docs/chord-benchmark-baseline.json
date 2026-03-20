@@ -1,0 +1,303 @@
+{
+  "generatedAt": "2026-03-20T00:37:24.917Z",
+  "sampleRate": 44100,
+  "fixtures": [
+    {
+      "id": "c-major-open",
+      "expected": "C"
+    },
+    {
+      "id": "a-minor-strum",
+      "expected": "Am"
+    },
+    {
+      "id": "g7-voiced",
+      "expected": "G7"
+    },
+    {
+      "id": "dsus4-piano",
+      "expected": "Dsus4"
+    },
+    {
+      "id": "e5-power",
+      "expected": "E5"
+    }
+  ],
+  "modes": [
+    {
+      "mode": "lowcpu",
+      "preset": {
+        "confEnter": 0.35,
+        "confExit": 0.28,
+        "holdMsEnter": 450,
+        "holdMsExit": 250,
+        "requiredStableFrames": 1,
+        "chromaAlphaFast": 0.4,
+        "chromaAlphaSlow": 0.2,
+        "harmonicThreshold": 0.1,
+        "rmsGate": 0.005,
+        "minSpectralClarity": 0,
+        "enableHarmonicAnalysis": false,
+        "disableEnergyGate": true,
+        "maxFps": 25,
+        "chromaSigmaCents": 45,
+        "fftSize": 8192,
+        "visualizerFpsCap": 30
+      },
+      "accuracy": 1,
+      "meanLockMs": 23.22,
+      "meanAnalysisElapsedMs": 73.89,
+      "fixtures": [
+        {
+          "fixtureId": "c-major-open",
+          "expected": "C",
+          "finalName": "C",
+          "firstDetectedAtMs": 23.219954648526077,
+          "matched": true,
+          "analysisElapsedMs": 173.18,
+          "frames": 80
+        },
+        {
+          "fixtureId": "a-minor-strum",
+          "expected": "Am",
+          "finalName": "Am",
+          "firstDetectedAtMs": 23.219954648526077,
+          "matched": true,
+          "analysisElapsedMs": 59.38,
+          "frames": 85
+        },
+        {
+          "fixtureId": "g7-voiced",
+          "expected": "G7",
+          "finalName": "G7",
+          "firstDetectedAtMs": 23.219954648526077,
+          "matched": true,
+          "analysisElapsedMs": 53.29,
+          "frames": 89
+        },
+        {
+          "fixtureId": "dsus4-piano",
+          "expected": "Dsus4",
+          "finalName": "Dsus4",
+          "firstDetectedAtMs": 23.219954648526077,
+          "matched": true,
+          "analysisElapsedMs": 46.31,
+          "frames": 67
+        },
+        {
+          "fixtureId": "e5-power",
+          "expected": "E5",
+          "finalName": "E5",
+          "firstDetectedAtMs": 23.219954648526077,
+          "matched": true,
+          "analysisElapsedMs": 37.31,
+          "frames": 63
+        }
+      ]
+    },
+    {
+      "mode": "responsive",
+      "preset": {
+        "confEnter": 0.35,
+        "confExit": 0.28,
+        "holdMsEnter": 300,
+        "holdMsExit": 200,
+        "requiredStableFrames": 1,
+        "chromaAlphaFast": 0.5,
+        "chromaAlphaSlow": 0.12,
+        "harmonicThreshold": 0.12,
+        "enableHarmonicAnalysis": true,
+        "maxFps": 45,
+        "chromaSigmaCents": 40,
+        "fftSize": 16384,
+        "visualizerFpsCap": 45
+      },
+      "accuracy": 1,
+      "meanLockMs": 46.44,
+      "meanAnalysisElapsedMs": 32.76,
+      "fixtures": [
+        {
+          "fixtureId": "c-major-open",
+          "expected": "C",
+          "finalName": "C",
+          "firstDetectedAtMs": 46.439909297052154,
+          "matched": true,
+          "analysisElapsedMs": 34.11,
+          "frames": 36
+        },
+        {
+          "fixtureId": "a-minor-strum",
+          "expected": "Am",
+          "finalName": "Am",
+          "firstDetectedAtMs": 46.439909297052154,
+          "matched": true,
+          "analysisElapsedMs": 37.67,
+          "frames": 39
+        },
+        {
+          "fixtureId": "g7-voiced",
+          "expected": "G7",
+          "finalName": "G7",
+          "firstDetectedAtMs": 46.439909297052154,
+          "matched": true,
+          "analysisElapsedMs": 38.37,
+          "frames": 41
+        },
+        {
+          "fixtureId": "dsus4-piano",
+          "expected": "Dsus4",
+          "finalName": "Dsus4",
+          "firstDetectedAtMs": 46.439909297052154,
+          "matched": true,
+          "analysisElapsedMs": 27.96,
+          "frames": 30
+        },
+        {
+          "fixtureId": "e5-power",
+          "expected": "E5",
+          "finalName": "E5",
+          "firstDetectedAtMs": 46.439909297052154,
+          "matched": true,
+          "analysisElapsedMs": 25.7,
+          "frames": 28
+        }
+      ]
+    },
+    {
+      "mode": "normal",
+      "preset": {
+        "confEnter": 0.4,
+        "confExit": 0.32,
+        "holdMsEnter": 500,
+        "holdMsExit": 250,
+        "requiredStableFrames": 2,
+        "chromaAlphaFast": 0.4,
+        "chromaAlphaSlow": 0.15,
+        "harmonicThreshold": 0.15,
+        "enableHarmonicAnalysis": true,
+        "maxFps": 40,
+        "chromaSigmaCents": 35,
+        "fftSize": 16384,
+        "visualizerFpsCap": 40
+      },
+      "accuracy": 1,
+      "meanLockMs": 46.44,
+      "meanAnalysisElapsedMs": 32.32,
+      "fixtures": [
+        {
+          "fixtureId": "c-major-open",
+          "expected": "C",
+          "finalName": "C",
+          "firstDetectedAtMs": 46.439909297052154,
+          "matched": true,
+          "analysisElapsedMs": 33.5,
+          "frames": 36
+        },
+        {
+          "fixtureId": "a-minor-strum",
+          "expected": "Am",
+          "finalName": "Am",
+          "firstDetectedAtMs": 46.439909297052154,
+          "matched": true,
+          "analysisElapsedMs": 36.29,
+          "frames": 39
+        },
+        {
+          "fixtureId": "g7-voiced",
+          "expected": "G7",
+          "finalName": "G7",
+          "firstDetectedAtMs": 46.439909297052154,
+          "matched": true,
+          "analysisElapsedMs": 37.77,
+          "frames": 41
+        },
+        {
+          "fixtureId": "dsus4-piano",
+          "expected": "Dsus4",
+          "finalName": "Dsus4",
+          "firstDetectedAtMs": 46.439909297052154,
+          "matched": true,
+          "analysisElapsedMs": 28.12,
+          "frames": 30
+        },
+        {
+          "fixtureId": "e5-power",
+          "expected": "E5",
+          "finalName": "E5",
+          "firstDetectedAtMs": 46.439909297052154,
+          "matched": true,
+          "analysisElapsedMs": 25.94,
+          "frames": 28
+        }
+      ]
+    },
+    {
+      "mode": "accurate",
+      "preset": {
+        "confEnter": 0.52,
+        "confExit": 0.42,
+        "holdMsEnter": 700,
+        "holdMsExit": 350,
+        "requiredStableFrames": 3,
+        "chromaAlphaFast": 0.35,
+        "chromaAlphaSlow": 0.18,
+        "harmonicThreshold": 0.15,
+        "enableHarmonicAnalysis": true,
+        "maxFps": 60,
+        "chromaSigmaCents": 30,
+        "fftSize": 32768,
+        "visualizerFpsCap": 60
+      },
+      "accuracy": 1,
+      "meanLockMs": 92.88,
+      "meanAnalysisElapsedMs": 25.86,
+      "fixtures": [
+        {
+          "fixtureId": "c-major-open",
+          "expected": "C",
+          "finalName": "C",
+          "firstDetectedAtMs": 92.87981859410431,
+          "matched": true,
+          "analysisElapsedMs": 27.5,
+          "frames": 14
+        },
+        {
+          "fixtureId": "a-minor-strum",
+          "expected": "Am",
+          "finalName": "Am",
+          "firstDetectedAtMs": 92.87981859410431,
+          "matched": true,
+          "analysisElapsedMs": 29.81,
+          "frames": 16
+        },
+        {
+          "fixtureId": "g7-voiced",
+          "expected": "G7",
+          "finalName": "G7",
+          "firstDetectedAtMs": 92.87981859410431,
+          "matched": true,
+          "analysisElapsedMs": 31.69,
+          "frames": 17
+        },
+        {
+          "fixtureId": "dsus4-piano",
+          "expected": "Dsus4",
+          "finalName": "Dsus4",
+          "firstDetectedAtMs": 92.87981859410431,
+          "matched": true,
+          "analysisElapsedMs": 20.86,
+          "frames": 11
+        },
+        {
+          "fixtureId": "e5-power",
+          "expected": "E5",
+          "finalName": "E5",
+          "firstDetectedAtMs": 92.87981859410431,
+          "matched": true,
+          "analysisElapsedMs": 19.45,
+          "frames": 10
+        }
+      ]
+    }
+  ]
+}
