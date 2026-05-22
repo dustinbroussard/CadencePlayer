@@ -21,5 +21,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeMetadata: (filePath, tags) => ipcRenderer.invoke('write-metadata', { filePath, tags }),
 
   // System: reveal file in folder
-  revealInFolder: (filePath) => ipcRenderer.invoke('reveal-in-folder', filePath)
+  revealInFolder: (filePath) => ipcRenderer.invoke('reveal-in-folder', filePath),
+
+  // Custom cover art upload
+  uploadCustomCover: (args) => ipcRenderer.invoke('upload-custom-cover', args),
+  selectCoverArtFile: () => ipcRenderer.invoke('select-cover-art-file'),
+  clearCustomCover: (trackPath) => ipcRenderer.invoke('clear-custom-cover', trackPath)
 });

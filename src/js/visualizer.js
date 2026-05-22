@@ -285,33 +285,24 @@ export class Visualizer {
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, width, height);
 
-    if (!this.coverImage || !this.coverReady) {
-      ctx.fillStyle = 'rgba(255,255,255,0.75)';
-      ctx.font = '600 16px Poppins, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('No cover art available', width / 2, height / 2);
-      return;
-    }
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const pulse = this.dataArray.reduce((sum, val) => sum + val, 0) / Math.max(1, this.dataArray.length);
+    const radius = Math.min(width, height) * 0.22 + pulse * 0.12;
+    const glow = ctx.createRadialGradient(centerX, centerY, radius * 0.2, centerX, centerY, radius * 1.8);
+    glow.addColorStop(0, 'rgba(255,255,255,0.18)');
+    glow.addColorStop(0.55, 'rgba(255,255,255,0.06)');
+    glow.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius * 1.8, 0, Math.PI * 2);
+    ctx.fill();
 
-    const img = this.coverImage;
-    const maxW = width * 0.75;
-    const maxH = height * 0.75;
-    const scale = Math.min(maxW / img.width, maxH / img.height);
-    const drawW = Math.max(1, img.width * scale);
-    const drawH = Math.max(1, img.height * scale);
-    const dx = (width - drawW) / 2;
-    const dy = (height - drawH) / 2;
-
-    ctx.save();
-    ctx.shadowBlur = 30;
-    ctx.shadowColor = 'rgba(0,0,0,0.45)';
-    ctx.drawImage(img, dx, dy, drawW, drawH);
-    ctx.restore();
-
-    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
     ctx.lineWidth = 2;
-    ctx.strokeRect(dx, dy, drawW, drawH);
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+    ctx.stroke();
   }
 
   // Mode: particle bursts reacting to bass/mids/highs with trails
@@ -436,18 +427,22 @@ export class Visualizer {
       this.coverImage = null;
       this.coverReady = false;
       this.coverUrl = '';
+      if (this.mode === 'cover') this.draw();
       return;
     }
     if (this.coverUrl === dataUrl) return;
+    this.coverReady = false;
     this.coverUrl = dataUrl;
     const img = new Image();
     img.onload = () => {
       this.coverImage = img;
       this.coverReady = true;
+      if (this.mode === 'cover') this.draw();
     };
     img.onerror = () => {
       this.coverImage = null;
       this.coverReady = false;
+      if (this.mode === 'cover') this.draw();
     };
     img.src = dataUrl;
   }

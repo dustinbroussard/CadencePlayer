@@ -23,6 +23,9 @@
   --scrollbar-thumb: rgba(255, 255, 255, 0.2);
   --chord-bg: rgba(255, 255, 255, 0.08);
   --input-bg: rgba(255, 255, 255, 0.06);
+  --cover-primary: rgba(63, 147, 255, 0.45);
+  --cover-secondary: rgba(8, 18, 30, 0.78);
+  --cover-glow: rgba(255, 255, 255, 0.16);
   --radius: 1rem;
   --radius-sm: 0.5rem;
   --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.25);
@@ -90,6 +93,9 @@ body.dark-mode {
   * {
     animation-duration: 1ms !important;
     transition-duration: 1ms !important;
+  }
+  .cover-backdrop {
+    transform: none !important;
   }
 }
 
@@ -367,15 +373,170 @@ body.drag-over .app-container {
 #visualizer-container {
   width: 100%;
   height: 100%;
+  position: relative;
   display: flex;
   justify-content: center;
   align-items: center;
+  isolation: isolate;
 }
 
 .visualizer-canvas {
   width: 100%;
   height: 100%;
   display: block;
+  transition: opacity var(--transition-slow), filter var(--transition-slow);
+}
+
+.cover-art-stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.cover-backdrop,
+.cover-color-wash {
+  position: absolute;
+  inset: -4%;
+  transition: opacity var(--transition-slow), background var(--transition-slow), transform 600ms ease;
+}
+
+.cover-backdrop {
+  background:
+    radial-gradient(circle at 30% 20%, var(--cover-primary), transparent 38%),
+    radial-gradient(circle at 72% 32%, var(--cover-glow), transparent 30%),
+    linear-gradient(135deg, color-mix(in srgb, var(--cover-secondary) 92%, black), color-mix(in srgb, var(--cover-primary) 38%, black));
+  filter: blur(20px) saturate(1.25);
+  opacity: 0.92;
+  transform: scale(1.08);
+}
+
+.cover-color-wash {
+  background:
+    linear-gradient(180deg, rgba(4, 8, 14, 0.1), rgba(4, 8, 14, 0.65)),
+    radial-gradient(circle at 50% 50%, transparent 0%, rgba(3, 5, 10, 0.3) 50%, rgba(3, 5, 10, 0.7) 100%);
+}
+
+.cover-frame {
+  position: absolute;
+  width: min(56vw, 380px);
+  aspect-ratio: 1;
+  border-radius: 32px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(255, 255, 255, 0.06) inset,
+    0 0 44px color-mix(in srgb, var(--cover-primary) 44%, transparent);
+  opacity: 0;
+  transform: scale(0.94) translateY(12px);
+  transition: opacity var(--transition-slow), transform var(--transition-slow), box-shadow var(--transition-slow);
+  background: rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(10px);
+}
+
+.cover-frame.is-active {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+}
+
+.cover-art-stage.is-cover-mode .cover-frame {
+  width: min(64vw, 460px);
+}
+
+.cover-art-image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.cover-art-cta {
+  position: absolute;
+  bottom: 28px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: min(92%, 340px);
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(8, 14, 24, 0.68);
+  color: #f8fbff;
+  backdrop-filter: blur(20px);
+  box-shadow: var(--shadow-md);
+  text-align: left;
+  pointer-events: auto;
+  cursor: pointer;
+  transition: transform var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
+  z-index: 3;
+}
+
+.cover-art-cta:hover {
+  transform: translateX(-50%) translateY(-2px);
+  background: rgba(12, 20, 33, 0.76);
+}
+
+.cover-art-cta-eyebrow,
+.cover-art-cta-title,
+.cover-art-cta-copy {
+  display: block;
+}
+
+.cover-art-cta-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  opacity: 0.78;
+}
+
+.cover-art-cta-title {
+  margin-top: 4px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.cover-art-cta-copy {
+  margin-top: 6px;
+  font-size: 13px;
+  opacity: 0.82;
+}
+
+.cover-drop-zone {
+  position: absolute;
+  inset: 22px;
+  border-radius: 28px;
+  border: 2px dashed rgba(255, 255, 255, 0.35);
+  background: rgba(10, 18, 28, 0.58);
+  backdrop-filter: blur(16px);
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+  z-index: 4;
+}
+
+.cover-drop-zone small {
+  opacity: 0.74;
+  font-size: 12px;
+}
+
+.cover-art-stage.is-placeholder .cover-frame {
+  box-shadow:
+    0 20px 70px rgba(0, 0, 0, 0.35),
+    0 0 0 1px rgba(255, 255, 255, 0.04) inset;
+}
+
+#visualizer-container.has-cover .visualizer-canvas {
+  opacity: 0.9;
+}
 }
 
 #video-container {
@@ -788,6 +949,22 @@ body.drag-over .app-container {
 
   .volume-and-eq {
     justify-content: center;
+  }
+
+  .cover-frame,
+  .cover-art-stage.is-cover-mode .cover-frame {
+    width: min(72vw, 320px);
+    border-radius: 24px;
+  }
+
+  .cover-art-cta {
+    bottom: 16px;
+    width: calc(100% - 24px);
+    min-width: 0;
+  }
+
+  .cover-drop-zone {
+    inset: 12px;
   }
 }
 

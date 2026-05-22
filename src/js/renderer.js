@@ -61,6 +61,16 @@ export class Renderer {
     this.videoSeek = document.getElementById('video-seek');
     this.videoModeChip = document.getElementById('video-mode-chip');
     this.videoChipText = document.getElementById('video-chip-text');
+    this.visualizerContainer = document.getElementById('visualizer-container');
+    this.coverArtStage = document.getElementById('cover-art-stage');
+    this.coverArtCta = document.getElementById('cover-art-cta');
+    this.coverDropZone = document.getElementById('cover-drop-zone');
+    this.coverFrames = Array.from(document.querySelectorAll('.cover-frame'));
+    this.coverImages = Array.from(document.querySelectorAll('.cover-art-image'));
+    this.activeCoverFrameIndex = 0;
+    this.currentCoverUrl = '';
+    this.currentCoverSource = 'placeholder';
+    this.pendingCoverRequest = 0;
 
     // Cache visualization mode to avoid frequent localStorage reads
     this._vizMode = localStorage.getItem('vizMode') || 'orb';
@@ -107,6 +117,7 @@ export class Renderer {
     this.initEventListeners();
     this.initEqControls();
     this.initDragAndDrop();
+    this.initCoverArtUi();
     this.initMetadataUi();
     // Initialize saved-queue modal controls (save/close/confirm handlers)
     this.initQueueSaveUi();
@@ -309,6 +320,7 @@ export class Renderer {
       this.startChordDetectorWhenReady();
       this.autoSwitchVisualizationForTrack(track);
       this.updateVideoModeUi();
+      if (this.vizControls && !this.vizControls.classList.contains('hidden')) this.initVizControls();
     });
     this.audioManager.on('playback-ended', () => this.handlePlaybackEnd());
     this.audioManager.on('queue-updated', () => this.renderQueue());
@@ -393,6 +405,7 @@ export class Renderer {
     document.addEventListener('click', (e) => {
       this.maybeCloseFloatingPanels(e);
       this.hideQueueContextMenu();
+      this.hideCoverArtContextMenu();
     });
     // Escape to close panels
     document.addEventListener('keydown', (e) => {
@@ -400,6 +413,7 @@ export class Renderer {
         this.closeEq();
         this.closeVizControls();
         this.hideQueueContextMenu();
+        this.hideCoverArtContextMenu();
         this.closeMetadataModal();
       }
     });
@@ -443,6 +457,11 @@ export class Renderer {
     });
 
     dropZone.addEventListener('drop', async (e) => {
+      if (this.extractDroppedImagePath(e.dataTransfer)) {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        return;
+      }
       e.preventDefault();
       dropZone.classList.remove('drag-over');
       const allowed = new Set(['mp3','wav','ogg','m4a','flac','aac','mp4','m4v','webm']);
@@ -508,21 +527,240 @@ export class Renderer {
     this.trackDurationEl.textContent = track ? '0:00 / ' + this.formatTime(track.duration) : '';
   }
 
-  updateCoverArt(track) {
-    if (!this.visualizer?.setCoverArt) return;
-    const dataUrl = this.getCoverArtDataUrl(track);
-    this.visualizer.setCoverArt(dataUrl);
-    const mode = this.getVizMode();
-    if (mode === 'cover') this.visualizer.draw();
+  async updateCoverArt(track) {
+    const requestId = ++this.pendingCoverRequest;
+    const coverArt = await this.ensureTrackCoverArt(track);
+    if (requestId !== this.pendingCoverRequest) return;
+
+    const dataUrl = coverArt?.url || '';
+    if (this.visualizer?.setCoverArt) this.visualizer.setCoverArt(dataUrl);
+    this.renderCoverArtStage(coverArt);
+    if (this.getVizMode() === 'cover') this.visualizer.draw();
   }
 
   getCoverArtDataUrl(track) {
-    if (!track || !track.meta || !track.meta.picture) return '';
-    const pic = track.meta.picture || {};
-    const data = pic.data || '';
-    if (!data) return '';
-    const format = pic.format || 'image/jpeg';
-    return `data:${format};base64,${data}`;
+    const coverUrl = track?.meta?.coverArt?.url;
+    if (coverUrl) return coverUrl;
+    const picture = track?.meta?.picture;
+    if (!picture?.data) return '';
+    return `data:${picture.format || 'image/jpeg'};base64,${picture.data}`;
+  }
+
+  async ensureTrackCoverArt(track) {
+    if (!track?.path) {
+      return { url: '', source: 'placeholder', placeholder: true };
+    }
+    const existing = track.meta?.coverArt;
+    if (existing?.url) return existing;
+    try {
+      const res = await window.electronAPI.readMetadata(track.path);
+      if (res?.success) {
+        track.meta = { ...(track.meta || {}), ...(res.tags || {}) };
+      }
+    } catch {
+      // Ignore read errors and fall through to placeholder rendering.
+    }
+    if (track.meta?.coverArt?.url) return track.meta.coverArt;
+    const pictureUrl = this.getCoverArtDataUrl(track);
+    if (pictureUrl) {
+      return {
+        url: pictureUrl,
+        source: 'embedded',
+        placeholder: false
+      };
+    }
+    return { url: '', source: 'placeholder', placeholder: true };
+  }
+
+  initCoverArtUi() {
+    if (!this.coverArtStage) return;
+
+    this.coverArtCta?.addEventListener('click', () => this.uploadCustomCoverArt());
+    this.coverArtStage.addEventListener('contextmenu', (event) => {
+      event.preventDefault();
+      this.showCoverArtContextMenu(event);
+    });
+
+    const showDrop = (event) => {
+      if (!this.extractDroppedImagePath(event.dataTransfer)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.coverDropZone?.classList.remove('hidden');
+    };
+
+    const hideDrop = () => {
+      this.coverDropZone?.classList.add('hidden');
+    };
+
+    this.coverArtStage.addEventListener('dragenter', showDrop);
+    this.coverArtStage.addEventListener('dragover', showDrop);
+    this.coverArtStage.addEventListener('dragleave', (event) => {
+      if (event.currentTarget === event.target) hideDrop();
+    });
+    this.coverArtStage.addEventListener('drop', async (event) => {
+      const imagePath = this.extractDroppedImagePath(event.dataTransfer);
+      if (!imagePath) return;
+      event.preventDefault();
+      event.stopPropagation();
+      hideDrop();
+      await this.applyCustomCoverArt(imagePath);
+    });
+  }
+
+  renderCoverArtStage(coverArt) {
+    if (!this.coverArtStage || !this.coverFrames.length || !this.coverImages.length) return;
+
+    const url = coverArt?.url || '';
+    const source = coverArt?.source || 'placeholder';
+    const isPlaceholder = !!coverArt?.placeholder || source === 'placeholder';
+    this.currentCoverSource = source;
+
+    this.coverArtStage.classList.toggle('is-placeholder', isPlaceholder);
+    this.coverArtStage.classList.toggle('has-cover', !!url);
+    this.coverArtStage.classList.toggle('is-cover-mode', this.getVizMode() === 'cover');
+    this.visualizerContainer?.classList.toggle('has-cover', !!url);
+    this.coverArtCta?.classList.toggle('hidden', !isPlaceholder);
+
+    if (!url) {
+      this.currentCoverUrl = '';
+      this.applyCoverPalette(['rgba(63, 147, 255, 0.45)', 'rgba(8, 18, 30, 0.78)']);
+      return;
+    }
+    if (url === this.currentCoverUrl) return;
+    this.currentCoverUrl = url;
+
+    const nextIndex = this.activeCoverFrameIndex === 0 ? 1 : 0;
+    const nextFrame = this.coverFrames[nextIndex];
+    const nextImage = this.coverImages[nextIndex];
+    const prevFrame = this.coverFrames[this.activeCoverFrameIndex];
+
+    nextImage.src = url;
+    nextImage.alt = 'Current track cover art';
+    nextImage.onload = () => {
+      this.updateCoverBackdropColors(nextImage);
+      prevFrame.classList.remove('is-active');
+      nextFrame.classList.add('is-active');
+      this.activeCoverFrameIndex = nextIndex;
+    };
+    nextImage.onerror = () => {
+      prevFrame.classList.remove('is-active');
+      nextFrame.classList.add('is-active');
+      this.activeCoverFrameIndex = nextIndex;
+      this.applyCoverPalette(['rgba(63, 147, 255, 0.45)', 'rgba(8, 18, 30, 0.78)']);
+    };
+  }
+
+  updateCoverBackdropColors(imageEl) {
+    try {
+      const palette = this.extractImagePalette(imageEl);
+      this.applyCoverPalette(palette);
+    } catch {
+      this.applyCoverPalette(['rgba(63, 147, 255, 0.45)', 'rgba(8, 18, 30, 0.78)']);
+    }
+  }
+
+  extractImagePalette(imageEl) {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const width = 24;
+    const height = 24;
+    canvas.width = width;
+    canvas.height = height;
+    ctx.drawImage(imageEl, 0, 0, width, height);
+    const { data } = ctx.getImageData(0, 0, width, height);
+    let r1 = 0, g1 = 0, b1 = 0, c1 = 0;
+    let r2 = 0, g2 = 0, b2 = 0, c2 = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      const alpha = data[i + 3];
+      if (alpha < 100) continue;
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const lightness = (r + g + b) / 3;
+      if (lightness > 150) {
+        r1 += r;
+        g1 += g;
+        b1 += b;
+        c1 += 1;
+      } else {
+        r2 += r;
+        g2 += g;
+        b2 += b;
+        c2 += 1;
+      }
+    }
+
+    const primary = c1 ? `rgba(${Math.round(r1 / c1)}, ${Math.round(g1 / c1)}, ${Math.round(b1 / c1)}, 0.52)` : 'rgba(63, 147, 255, 0.45)';
+    const secondary = c2 ? `rgba(${Math.round(r2 / c2)}, ${Math.round(g2 / c2)}, ${Math.round(b2 / c2)}, 0.78)` : 'rgba(8, 18, 30, 0.78)';
+    return [primary, secondary];
+  }
+
+  applyCoverPalette([primary, secondary]) {
+    document.documentElement.style.setProperty('--cover-primary', primary);
+    document.documentElement.style.setProperty('--cover-secondary', secondary);
+    document.documentElement.style.setProperty('--cover-glow', this.toGlowColor(primary));
+  }
+
+  toGlowColor(color) {
+    const match = /rgba\((\d+),\s*(\d+),\s*(\d+),\s*([^)]+)\)/.exec(color || '');
+    if (!match) return 'rgba(255, 255, 255, 0.16)';
+    return `rgba(${match[1]}, ${match[2]}, ${match[3]}, 0.18)`;
+  }
+
+  extractDroppedImagePath(dataTransfer) {
+    const files = Array.from(dataTransfer?.files || []);
+    const file = files.find((entry) => this.isSupportedCoverImage(entry));
+    return file?.path || '';
+  }
+
+  isSupportedCoverImage(file) {
+    const name = file?.name || '';
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    return ['jpg', 'jpeg', 'png', 'webp'].includes(ext);
+  }
+
+  async uploadCustomCoverArt() {
+    const track = this.audioManager.getCurrentTrack();
+    if (!track?.path) {
+      this.showErrorBanner('Load a track before adding custom cover art.');
+      return;
+    }
+    const picked = await window.electronAPI.selectCoverArtFile?.();
+    if (!picked?.success || !picked.path) return;
+    await this.applyCustomCoverArt(picked.path);
+  }
+
+  async applyCustomCoverArt(imagePath) {
+    const track = this.audioManager.getCurrentTrack();
+    if (!track?.path) return;
+    const result = await window.electronAPI.uploadCustomCover({
+      trackPath: track.path,
+      imagePath
+    });
+    if (!result?.success) {
+      this.showErrorBanner(result?.error || 'Could not update cover art.');
+      return;
+    }
+    track.meta = {
+      ...(track.meta || {}),
+      coverArt: result.coverArt
+    };
+    await this.updateCoverArt(track);
+    if (this.vizControls && !this.vizControls.classList.contains('hidden')) this.initVizControls();
+  }
+
+  async removeCustomCoverArt() {
+    const track = this.audioManager.getCurrentTrack();
+    if (!track?.path) return;
+    const result = await window.electronAPI.clearCustomCover?.(track.path);
+    if (!result?.success) {
+      this.showErrorBanner(result?.error || 'Could not remove custom cover art.');
+      return;
+    }
+    track.meta = { ...(track.meta || {}) };
+    delete track.meta.coverArt;
+    await this.updateCoverArt(track);
+    if (this.vizControls && !this.vizControls.classList.contains('hidden')) this.initVizControls();
   }
 
   handlePlaybackEnd() {
@@ -695,6 +933,7 @@ export class Renderer {
       if (m !== 'video') this.prevNonVideoMode = m;
       this.updateVisualizationUi(m);
       this.updateVideoModeUi();
+      if (m !== 'video') this.visualizer.draw();
     });
     vizRow.appendChild(vizLbl); vizRow.appendChild(vizSelect); this.appMenu.appendChild(vizRow);
     addItem('Visualization Settings…', () => this.toggleVizControls());
@@ -1006,6 +1245,59 @@ export class Renderer {
     if (this.queueCtx?.el) this.queueCtx.el.classList.add('hidden');
   }
 
+  ensureCoverArtContextMenu() {
+    if (this.coverCtx) return this.coverCtx;
+    const menu = document.createElement('div');
+    menu.id = 'cover-context-menu';
+    menu.className = 'context-menu hidden';
+    const change = document.createElement('div');
+    change.className = 'context-item';
+    change.textContent = 'Change Cover';
+    const remove = document.createElement('div');
+    remove.className = 'context-item destructive';
+    remove.textContent = 'Remove Override';
+    menu.appendChild(change);
+    menu.appendChild(remove);
+    document.body.appendChild(menu);
+    this.coverCtx = { el: menu, change, remove };
+    return this.coverCtx;
+  }
+
+  showCoverArtContextMenu(event) {
+    const track = this.audioManager.getCurrentTrack();
+    if (!track?.path) return;
+    const ctx = this.ensureCoverArtContextMenu();
+    const { el, change, remove } = ctx;
+    const left = Number(event.clientX) || 0;
+    const top = Number(event.clientY) || 0;
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+    el.classList.remove('hidden');
+    if (typeof window !== 'undefined' && typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        const rect = el.getBoundingClientRect();
+        const margin = 8;
+        const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+        const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+        el.style.left = `${Math.min(Math.max(margin, left), maxLeft)}px`;
+        el.style.top = `${Math.min(Math.max(margin, top), maxTop)}px`;
+      });
+    }
+    change.onclick = () => {
+      this.hideCoverArtContextMenu();
+      this.uploadCustomCoverArt();
+    };
+    remove.style.display = this.currentCoverSource === 'override' ? '' : 'none';
+    remove.onclick = () => {
+      this.hideCoverArtContextMenu();
+      this.removeCustomCoverArt();
+    };
+  }
+
+  hideCoverArtContextMenu() {
+    if (this.coverCtx?.el) this.coverCtx.el.classList.add('hidden');
+  }
+
   // Metadata overrides: UI + helpers
   initMetadataUi() {
     // Wire modal if present
@@ -1135,11 +1427,13 @@ export class Renderer {
     this.updateVisualizationUi(next);
     this.updateVideoModeUi();
     this.initVideoOverlayHandlers();
+    if (next !== 'video') this.visualizer.draw();
   }
 
   updateVisualizationUi(mode) {
-    if (!this.visualModeBtn) return;
     const m = mode || this.getVizMode();
+    this.coverArtStage?.classList.toggle('is-cover-mode', m === 'cover');
+    if (!this.visualModeBtn) return;
     const label = (
       m === 'bars' ? 'Bars' :
       m === 'wave' ? 'Wave' :
@@ -1177,6 +1471,7 @@ export class Renderer {
       if (m !== 'video') this.prevNonVideoMode = m;
       this.updateVisualizationUi(m);
       this.updateVideoModeUi();
+      if (m !== 'video') this.visualizer.draw();
     });
     modeRow.appendChild(modeLabel);
     modeRow.appendChild(modeSelect);
@@ -1201,6 +1496,7 @@ export class Renderer {
       const t = e.target.value;
       if (this.visualizer.setTheme) this.visualizer.setTheme(t);
       localStorage.setItem('vizTheme', t);
+      if (this.getVizMode() !== 'video') this.visualizer.draw();
     });
     themeRow.appendChild(themeLabel);
     themeRow.appendChild(themeSelect);
@@ -1224,6 +1520,33 @@ export class Renderer {
       row.appendChild(input);
       el.appendChild(row);
     };
+
+    const currentTrack = this.audioManager.getCurrentTrack();
+    const hasTrack = !!currentTrack?.path;
+    const hasCustomCover = !!(hasTrack && currentTrack?.meta?.coverArt?.source === 'override');
+    const coverRow = document.createElement('div');
+    coverRow.style.marginTop = '8px';
+    const coverLabel = document.createElement('label');
+    coverLabel.textContent = 'Cover Art';
+    coverLabel.style.marginRight = '8px';
+    const uploadBtn = document.createElement('button');
+    uploadBtn.type = 'button';
+    uploadBtn.className = 'inline-btn';
+    uploadBtn.textContent = hasCustomCover ? 'Replace Image' : 'Upload Image';
+    uploadBtn.disabled = !hasTrack;
+    uploadBtn.addEventListener('click', () => this.uploadCustomCoverArt());
+    coverRow.appendChild(coverLabel);
+    coverRow.appendChild(uploadBtn);
+    if (hasCustomCover) {
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'inline-btn';
+      removeBtn.style.marginLeft = '8px';
+      removeBtn.textContent = 'Use Embedded';
+      removeBtn.addEventListener('click', () => this.removeCustomCoverArt());
+      coverRow.appendChild(removeBtn);
+    }
+    el.appendChild(coverRow);
 
     // Bars: count
     addSlider('Bars', 32, 256, 8, cfg?.bars?.count ?? 160, (val) => {

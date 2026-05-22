@@ -3,7 +3,19 @@
 const path = require('path');
 const { pathToFileURL } = require('url');
 
-const { app, BrowserWindow, ipcMain, shell, Menu, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Menu, dialog, protocol, net, nativeImage } = require('electron');
+const mm = require('music-metadata');
+
+const {
+  buildCoverArtPayload,
+  clearCoverOverride,
+  getEmbeddedPicture,
+  persistCoverOverride
+} = require('./src/js/cover-art-service.cjs');
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'app-data', privileges: { standard: true, secure: true, supportFetchAPI: true, bypassCSP: true } }
+]);
 
 // Enable live reload for development
 if (process.env.NODE_ENV === 'development') {
@@ -161,12 +173,12 @@ ipcMain.handle('read-metadata', async (_evt, filePath) => {
     if (!isNonEmptyString(filePath)) {
       return { success: false, error: 'Invalid file path' };
     }
-    const mm = require('music-metadata');
     const meta = await mm.parseFile(filePath, { duration: false });
     const { common } = meta || {};
-    const picture = Array.isArray(common?.picture) ? common.picture[0] : null;
-    const pictureData = picture?.data ? picture.data.toString('base64') : '';
-    const pictureFormat = picture?.format || picture?.type || 'image/jpeg';
+    const userData = app.getPath('userData');
+    const picture = getEmbeddedPicture(common);
+    const coverArt = buildCoverArtPayload(filePath, common, userData);
+
     return {
       success: true,
       tags: {
@@ -175,7 +187,8 @@ ipcMain.handle('read-metadata', async (_evt, filePath) => {
         album: common?.album || '',
         year: common?.year ? String(common.year) : '',
         genre: Array.isArray(common?.genre) ? common.genre.join(', ') : (common?.genre || ''),
-        picture: pictureData ? { data: pictureData, format: pictureFormat } : null
+        picture: picture ? { data: picture.data, format: picture.format } : null,
+        coverArt
       }
     };
   } catch (e) {
@@ -237,8 +250,58 @@ ipcMain.handle('reveal-in-folder', async (_evt, filePath) => {
   }
 });
 
+// Upload custom cover
+ipcMain.handle('upload-custom-cover', async (_evt, { trackPath, imagePath }) => {
+  try {
+    if (!isNonEmptyString(trackPath) || !isNonEmptyString(imagePath)) {
+      return { success: false, error: 'Invalid track or image path.' };
+    }
+    return persistCoverOverride({
+      userDataPath: app.getPath('userData'),
+      trackPath,
+      imagePath,
+      nativeImage
+    });
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+});
+
+ipcMain.handle('select-cover-art-file', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [{ name: 'Image Files', extensions: ['jpg', 'jpeg', 'png', 'webp'] }]
+  });
+  if (result.canceled || !result.filePaths.length) {
+    return { success: false, canceled: true };
+  }
+  return { success: true, path: result.filePaths[0] };
+});
+
+ipcMain.handle('clear-custom-cover', async (_evt, trackPath) => {
+  try {
+    if (!isNonEmptyString(trackPath)) {
+      return { success: false, error: 'Invalid track path.' };
+    }
+    return clearCoverOverride({
+      userDataPath: app.getPath('userData'),
+      trackPath
+    });
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+});
+
 // App event handlers
 app.whenReady().then(() => {
+  protocol.handle('app-data', (request) => {
+    let filePath = decodeURIComponent(request.url.slice('app-data://'.length));
+    if (process.platform === 'win32' && filePath.startsWith('/')) {
+      filePath = filePath.slice(1);
+    }
+    return net.fetch(pathToFileURL(filePath).href);
+  });
+
   createWindow();
   setAppMenu();
 

@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark light">
   <!-- Security: strict but compatible Content Security Policy for local app -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: file:; media-src 'self' blob: file:; connect-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: file: app-data:; media-src 'self' blob: file:; connect-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none';">
   <!-- Ensure stylesheet path matches actual location -->
   <link rel="stylesheet" href="src/css/styles.css">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
@@ -65,6 +65,25 @@
       <div class="main-content">
         <div id="visualizer-container">
           <canvas id="visualizer" class="visualizer-canvas"></canvas>
+          <div id="cover-art-stage" class="cover-art-stage" aria-live="polite">
+            <div class="cover-backdrop"></div>
+            <div class="cover-color-wash"></div>
+            <div class="cover-frame cover-frame-a is-active">
+              <img class="cover-art-image" alt="Current track cover art" />
+            </div>
+            <div class="cover-frame cover-frame-b">
+              <img class="cover-art-image" alt="" />
+            </div>
+            <button id="cover-art-cta" class="cover-art-cta hidden" type="button">
+              <span class="cover-art-cta-eyebrow">Artwork Missing</span>
+              <span class="cover-art-cta-title">Upload Artwork</span>
+              <span class="cover-art-cta-copy">Add a JPG, PNG, or WEBP cover for this track.</span>
+            </button>
+            <div id="cover-drop-zone" class="cover-drop-zone hidden" aria-hidden="true">
+              <span>Drop artwork here</span>
+              <small>JPG, PNG, or WEBP up to 1024 x 1024</small>
+            </div>
+          </div>
           <div id="video-container" class="visualizer-canvas hidden" aria-label="Video container">
             <div id="video-overlay" class="video-overlay hidden" aria-hidden="true">
               <button id="video-mode-chip" class="video-chip control-btn" aria-label="Switch back to last visualization" title="Switch back to last visualization">
