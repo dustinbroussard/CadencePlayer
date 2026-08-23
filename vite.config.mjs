@@ -26,4 +26,18 @@ export default defineConfig({
     server: {
         port: 3000,
     },
+    test: {
+        globals: true,
+        environment: 'jsdom',
+        coverage: {
+            provider: 'v8',
+            reporter: ['text', 'json', 'html'],
+            thresholds: {
+                statements: 75,
+                branches: 75,
+                functions: 75,
+                lines: 75
+            }
+        }
+    }
 });

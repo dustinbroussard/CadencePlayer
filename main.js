@@ -3,7 +3,7 @@
 const path = require('path');
 const { pathToFileURL } = require('url');
 
-const { app, BrowserWindow, ipcMain, shell, Menu, dialog, protocol, net, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Menu, dialog, protocol, net, nativeImage, autoUpdater } = require('electron');
 const mm = require('music-metadata');
 
 const {
@@ -292,6 +292,52 @@ ipcMain.handle('clear-custom-cover', async (_evt, trackPath) => {
   }
 });
 
+function setupAutoUpdater() {
+  if (process.env.NODE_ENV === 'development') {
+    return;
+  }
+
+  const server = 'https://update.electronjs.org';
+  const repo = 'dustinbroussard/CadencePlayer';
+  const feedURL = `${server}/${repo}/${process.platform}-${process.arch}/${app.getVersion()}`;
+
+  try {
+    autoUpdater.setFeedURL({ url: feedURL });
+
+    // Check for updates every 15 minutes
+    setInterval(() => {
+      autoUpdater.checkForUpdates();
+    }, 15 * 60 * 1000);
+
+    // Initial check after 5 seconds
+    setTimeout(() => {
+      autoUpdater.checkForUpdates();
+    }, 5000);
+
+    autoUpdater.on('update-downloaded', (event, releaseNotes, releaseName) => {
+      const dialogOpts = {
+        type: 'info',
+        buttons: ['Restart', 'Later'],
+        title: 'Application Update',
+        message: process.platform === 'win32' ? releaseNotes : releaseName,
+        detail: 'A new version of Cadence Player has been downloaded. Restart the application to apply the updates.'
+      };
+
+      dialog.showMessageBox(mainWindow, dialogOpts).then((returnValue) => {
+        if (returnValue.response === 0) {
+          autoUpdater.quitAndInstall();
+        }
+      });
+    });
+
+    autoUpdater.on('error', (err) => {
+      console.error('Update error:', err);
+    });
+  } catch (e) {
+    console.error('Failed to configure autoUpdater:', e);
+  }
+}
+
 // App event handlers
 app.whenReady().then(() => {
   protocol.handle('app-data', (request) => {
@@ -304,6 +350,7 @@ app.whenReady().then(() => {
 
   createWindow();
   setAppMenu();
+  setupAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

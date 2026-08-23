@@ -1,33 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 import { AudioManager } from '../src/js/audio-manager.js';
+import { setupAudioContextMocks } from './helpers/audio-context-mock.js';
 
 describe('AudioManager.moveTrack', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
-
-  function setupAudioContextMocks() {
-    global.document = { addEventListener: vi.fn() };
-
-    class FakeNode {
-      constructor() { this.connect = vi.fn(); this.disconnect = vi.fn(); }
-    }
-    class FakeAnalyser extends FakeNode { constructor(){ super(); this.fftSize=0; this.smoothingTimeConstant=0; this.minDecibels=0; this.maxDecibels=0; } }
-    class FakeGain extends FakeNode { constructor(){ super(); this.gain = { value: 1 }; } }
-    class FakeFilter extends FakeNode { constructor(){ super(); this.frequency={value:0}; this.gain={value:0}; this.Q={value:0}; } }
-    class FakeAudioContext {
-      constructor(){
-        this.createAnalyser = vi.fn(() => new FakeAnalyser());
-        this.createBiquadFilter = vi.fn(() => new FakeFilter());
-        this.createGain = vi.fn(() => new FakeGain());
-        this.createMediaElementSource = vi.fn((audio) => { const n=new FakeNode(); n.mediaElement = audio; return n; });
-        this.destination = new FakeNode();
-        this.state = 'running';
-      }
-    }
-    global.AudioContext = FakeAudioContext;
-  }
 
   it('updates currentIndex correctly when moving tracks', () => {
     setupAudioContextMocks();

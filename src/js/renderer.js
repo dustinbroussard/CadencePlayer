@@ -1,22 +1,22 @@
 import { AudioManager } from './audio-manager.js';
 import { Visualizer } from './visualizer.js';
 import { ChordDetector } from './chord-detector.js';
-import { applyChordModePreset } from './chord-mode-presets.js';
-import { safeAlert, safeConfirm, safePrompt } from './ui/utils.js';
-import { BUILTIN_EQ_PRESETS, getCustomEqPresets, setCustomEqPresets } from './ui/eq-presets.js';
-import { getSavedQueues, setSavedQueues } from './ui/queue-storage.js';
+import { safeAlert, safeConfirm } from './ui/utils.js';
+import { BUILTIN_EQ_PRESETS, getCustomEqPresets } from './ui/eq-presets.js';
+import { getSavedQueues } from './ui/queue-storage.js';
 import { getChordColors } from './ui/chord-colors.js';
 
+import { QueueManager } from './queue-manager.js';
+import { SettingsManager } from './settings-manager.js';
+import { ChordUi } from './chord-ui.js';
+import { VideoHandler } from './video-handler.js';
 
-// Exported so tests can instantiate and exercise behaviour without relying on
-// the global DOMContentLoaded hook at the bottom of the file.
 export class Renderer {
   constructor() {
     this.audioManager = new AudioManager();
     this.visualizer = new Visualizer('visualizer', this.audioManager.getAnalyser());
     this.chordDetector = new ChordDetector(this.audioManager.getChordAnalyser(), {
       sampleRate: this.audioManager.ctx.sampleRate,
-      // Tune detector for quicker response and smoother confidence
       confEnter: 0.4,
       confExit: 0.32,
       holdMsEnter: 500,
@@ -26,7 +26,6 @@ export class Renderer {
       noiseFloorAlpha: 0.06,
       chromaAlphaFast: 0.4,
       chromaAlphaSlow: 0.15,
-      // Provide RMS data for gating
       getRms: () => this.audioManager.getCurrentRms(),
       rmsGate: 0.01,
       minSpectralClarity: 0.15
@@ -39,7 +38,7 @@ export class Renderer {
     this.trackNameEl = document.getElementById('current-track-name');
     this.trackDurationEl = document.getElementById('current-track-duration');
     this.chordReadout = document.getElementById('chord-readout');
-    this.diagEl = document.getElementById('diag'); // diagnostics overlay
+    this.diagEl = document.getElementById('diag');
     this.playPauseBtn = document.getElementById('play-pause-btn');
     this.playIcon = document.getElementById('play-icon');
     this.pauseIcon = document.getElementById('pause-icon');
@@ -72,46 +71,46 @@ export class Renderer {
     this.currentCoverSource = 'placeholder';
     this.pendingCoverRequest = 0;
 
-    // Cache visualization mode to avoid frequent localStorage reads
+    // Cache visualization mode
     this._vizMode = localStorage.getItem('vizMode') || 'orb';
-    // Remember last non-video viz mode for auto-restore
     this.prevNonVideoMode = this._vizMode === 'video' ? 'orb' : this._vizMode;
     this.toggleChordsBtn = document.getElementById('toggle-chords-btn');
     this.eqControls = document.getElementById('eq-controls');
-    // Cache for EQ sliders to update when applying presets
     this.eqSliderEls = [];
-    // Queue Save Modal refs (initialized later)
     this.queueSaveModal = null;
     this.queueNameInput = null;
     this.queueSaveConfirmBtn = null;
     this.queueSaveCancelBtn = null;
     this.darkModeToggle = document.getElementById('dark-mode-toggle');
-    // App menu (header dropdown)
     this.appMenuBtn = document.getElementById('app-menu-btn');
     this.appMenu = document.getElementById('app-menu');
-    // Error banner for runtime issues
     this.errorBanner = document.getElementById('error-banner');
     this.errorBannerMessage = document.getElementById('error-banner-message');
     this.errorBannerClose = document.getElementById('error-banner-close');
 
-    // Metadata overrides store (persisted in localStorage)
+    // Metadata overrides store
     this.metaOverrides = (() => { try { return JSON.parse(localStorage.getItem('metadataOverrides') || '{}'); } catch { return {}; } })();
 
     // Custom title bar buttons
     this.minimizeBtn = document.getElementById('minimize-btn');
     this.maximizeBtn = document.getElementById('maximize-btn');
     this.closeBtn = document.getElementById('close-btn');
+
     // Chord detection state/mode
-    this.detectorRunning = false; // ensures detector starts only once per track
+    this.detectorRunning = false;
     this.chordsEnabled = true;
-    this.chordMode = 'lowcpu'; // 'responsive' | 'normal' | 'accurate' | 'lowcpu'
+    this.chordMode = 'lowcpu';
     this.chordPulseTimeout = null;
     this.pendingDetectorStartRaf = null;
-    // Avoid allocating a new bound function on every animation frame
     this._updateLoop = this.update.bind(this);
 
-    // Restore persisted preferences before wiring up handlers so UI reflects
-    // the user's last session immediately on launch.
+    // Instantiate Sub-modules
+    this.queueManager = new QueueManager(this);
+    this.settingsManager = new SettingsManager(this);
+    this.chordUi = new ChordUi(this);
+    this.videoHandler = new VideoHandler(this);
+
+    // Initialize/Restore preferences
     this.loadPreferences();
 
     this.initEventListeners();
@@ -119,68 +118,173 @@ export class Renderer {
     this.initDragAndDrop();
     this.initCoverArtUi();
     this.initMetadataUi();
-    // Initialize saved-queue modal controls (save/close/confirm handlers)
     this.initQueueSaveUi();
     this.initAppMenu();
     this.initErrorHandling();
-    // Prepare video overlay controls if user switches to video mode
     this.initVideoOverlayHandlers();
 
-    // Start chord detector loop
-    this.chordDetector.setOnChord(({ name, confidence }) => {
-      if (!this.chordReadout) return;
-
-      if (!name) {
-        this.chordReadout.textContent = '—';
-        this.chordReadout.classList.add('dim');
-        this.chordReadout.classList.remove('pulse');
-        this.chordReadout.style.removeProperty('color');
-        this.chordReadout.style.removeProperty('background');
-        this.chordReadout.style.removeProperty('border-color');
-      } else {
-        const conf = Math.round(confidence * 100);
-        this.chordReadout.textContent = `${name}  ·  ${conf}%`;
-
-        const { fg, bg } = getChordColors(name);
-        const greenThresh = Math.round(this.chordDetector.confEnter * 100);
-        this.chordReadout.style.color = conf >= greenThresh ? fg : '';
-        this.chordReadout.style.background = bg;
-        this.chordReadout.style.borderColor = fg;
-
-        this.chordReadout.classList.remove('dim');
-        this.chordReadout.classList.add('pulse');
-        if (this.chordPulseTimeout) clearTimeout(this.chordPulseTimeout);
-        this.chordPulseTimeout = setTimeout(() => {
-          if (this.chordReadout) this.chordReadout.classList.remove('pulse');
-          this.chordPulseTimeout = null;
-        }, 120);
-      }
-    });
     this.applyChordMode(this.chordMode);
   }
 
-  autoSwitchVisualizationForTrack(track) {
-    try {
-      const isVideo = !!(track && track.isVideo);
-      const cur = this.getVizMode();
-      if (isVideo && cur !== 'video') {
-        this.prevNonVideoMode = cur === 'video' ? this.prevNonVideoMode : cur;
-        this.setVizMode('video');
-        this.updateVisualizationUi('video');
-      } else if (!isVideo && cur === 'video') {
-        const restore = this.prevNonVideoMode || 'orb';
-        if (this.visualizer.setMode) this.visualizer.setMode(restore);
-        this.setVizMode(restore);
-        this.updateVisualizationUi(restore);
-      }
-    } catch { /* ignore */ }
+  // Delegated QueueManager operations
+  clearQueue() {
+    this.queueManager.clearQueue();
   }
 
+  addFiles() {
+    this.queueManager.addFiles();
+  }
 
+  initDragAndDrop() {
+    this.queueManager.initDragAndDrop();
+  }
 
-  // Start detector only when audio context is running and audio is flowing
+  renderQueue() {
+    this.queueManager.renderQueue();
+  }
+
+  ensureQueueContextMenu() {
+    return this.queueManager.ensureQueueContextMenu();
+  }
+
+  showQueueContextMenu(e, index) {
+    this.queueManager.showQueueContextMenu(e, index);
+  }
+
+  hideQueueContextMenu() {
+    this.queueManager.hideQueueContextMenu();
+  }
+
+  saveQueueAs() {
+    this.queueManager.saveQueueAs();
+  }
+
+  openQueueSaveModal() {
+    this.queueManager.openQueueSaveModal();
+  }
+
+  initQueueSaveUi() {
+    this.queueManager.initQueueSaveUi();
+  }
+
+  closeQueueSaveModal() {
+    this.queueManager.closeQueueSaveModal();
+  }
+
+  saveQueueFromModal() {
+    this.queueManager.saveQueueFromModal();
+  }
+
+  loadQueueByName(name) {
+    return this.queueManager.loadQueueByName(name);
+  }
+
+  deleteSavedQueue(name) {
+    this.queueManager.deleteSavedQueue(name);
+  }
+
+  // Delegated SettingsManager preferences
+  loadPreferences() {
+    this.settingsManager.loadPreferences();
+  }
+
+  getVizMode() {
+    return this.settingsManager.getVizMode();
+  }
+
+  setVizMode(mode) {
+    return this.settingsManager.setVizMode(mode);
+  }
+
+  initEqControls() {
+    this.settingsManager.initEqControls();
+  }
+
+  saveCustomEqPreset(name) {
+    this.settingsManager.saveCustomEqPreset(name);
+  }
+
+  deleteCustomEqPreset(name) {
+    this.settingsManager.deleteCustomEqPreset(name);
+  }
+
+  getCurrentEqGains() {
+    return this.settingsManager.getCurrentEqGains();
+  }
+
+  setEqGains(gains, persist) {
+    this.settingsManager.setEqGains(gains, persist);
+  }
+
+  toggleEq() {
+    this.settingsManager.toggleEq();
+  }
+
+  closeEq() {
+    this.settingsManager.closeEq();
+  }
+
+  toggleVizControls() {
+    this.settingsManager.toggleVizControls();
+  }
+
+  closeVizControls() {
+    this.settingsManager.closeVizControls();
+  }
+
+  maybeCloseFloatingPanels(e) {
+    this.settingsManager.maybeCloseFloatingPanels(e);
+  }
+
+  toggleDarkMode() {
+    this.settingsManager.toggleDarkMode();
+  }
+
+  initVizControls() {
+    this.settingsManager.initVizControls();
+  }
+
+  // Delegated ChordUi operations
+  toggleChords() {
+    this.chordUi.toggleChords();
+  }
+
+  cycleChordMode() {
+    this.chordUi.cycleChordMode();
+  }
+
+  applyChordMode(mode) {
+    this.chordUi.applyChordMode(mode);
+  }
+
+  updateChordToggleUi() {
+    this.chordUi.updateChordToggleUi();
+  }
+
+  updateDiagnostics() {
+    this.chordUi.updateDiagnostics();
+  }
+
+  // Delegated VideoHandler operations
+  autoSwitchVisualizationForTrack(track) {
+    this.videoHandler.autoSwitchVisualizationForTrack(track);
+  }
+
+  initVideoOverlayHandlers() {
+    this.videoHandler.initVideoOverlayHandlers();
+  }
+
+  toggleFullscreen() {
+    this.videoHandler.toggleFullscreen();
+  }
+
+  updateVideoModeUi() {
+    this.videoHandler.updateVideoModeUi();
+  }
+
+  // Shared implementation logic
   startChordDetectorWhenReady() {
-    if (this.detectorRunning) return; // prevent multiple loops
+    if (this.detectorRunning) return;
     if (this.pendingDetectorStartRaf) return;
     let lastTime = 0;
     const tryStart = () => {
@@ -204,75 +308,6 @@ export class Renderer {
 
   getChordColors(name) {
     return getChordColors(name);
-  }
-
-  // Load persisted preferences for dark mode, volume and chord options.
-  loadPreferences() {
-    const dark = localStorage.getItem('darkMode');
-    if (dark === 'true') {
-      document.body.classList.add('dark-mode');
-    }
-
-    const vol = parseFloat(localStorage.getItem('volume'));
-    if (!isNaN(vol)) {
-      this.volumeSlider.value = vol;
-      this.audioManager.setVolume(vol);
-    }
-
-    const savedChords = localStorage.getItem('chordsEnabled');
-    if (savedChords === 'false') {
-      this.chordsEnabled = false;
-    }
-
-    const savedMode = localStorage.getItem('chordMode');
-    if (savedMode) {
-      this.chordMode = savedMode;
-    }
-
-    // Shuffle / Repeat
-    const savedShuffle = localStorage.getItem('shuffle');
-    const savedRepeat = localStorage.getItem('repeat');
-    if (savedShuffle === 'true') {
-      this.audioManager.setShuffle(true);
-      this.shuffleBtn.classList.remove('inactive');
-      this.repeatBtn.classList.add('inactive');
-    }
-    if (savedRepeat === 'true') {
-      this.audioManager.setRepeat(true);
-      this.repeatBtn.classList.remove('inactive');
-      this.shuffleBtn.classList.add('inactive');
-    }
-
-    // Visualization mode
-    const viz = this.getVizMode();
-    if (viz) {
-      if (this.visualizer.setMode) this.visualizer.setMode(viz);
-      this.updateVisualizationUi();
-    }
-    const theme = localStorage.getItem('vizTheme');
-    if (theme && this.visualizer.setTheme) this.visualizer.setTheme(theme);
-    const cfg = (() => { try { return JSON.parse(localStorage.getItem('vizConfig') || '{}'); } catch { return {}; } })();
-    if (this.visualizer.setConfig && cfg) {
-      Object.keys(cfg).forEach(mode => this.visualizer.setConfig(mode, cfg[mode]));
-    }
-
-    // Ensure UI reflects the restored settings
-    this.updateChordToggleUi();
-  }
-
-  getVizMode() {
-    if (this._vizMode) return this._vizMode;
-    const m = localStorage.getItem('vizMode') || 'orb';
-    this._vizMode = m;
-    return m;
-  }
-
-  setVizMode(mode) {
-    const allowed = new Set(['orb', 'bars', 'wave', 'spectrogram', 'particles', 'cover', 'video']);
-    const next = allowed.has(mode) ? mode : 'orb';
-    this._vizMode = next;
-    try { localStorage.setItem('vizMode', next); } catch { /* ignore */ }
-    return next;
   }
 
   initEventListeners() {
@@ -316,7 +351,7 @@ export class Renderer {
     this.audioManager.on('track-loaded', (track) => {
       this.updateTrackInfo(track);
       this.updateCoverArt(track);
-      this.detectorRunning = false; // allow detector to restart for new track
+      this.detectorRunning = false;
       this.startChordDetectorWhenReady();
       this.autoSwitchVisualizationForTrack(track);
       this.updateVideoModeUi();
@@ -326,10 +361,8 @@ export class Renderer {
     this.audioManager.on('queue-updated', () => this.renderQueue());
     this.audioManager.on('playback-state', (playing) => this.syncPlaybackUi(playing));
 
-    // Kick off chord detector after first user interaction
     document.addEventListener('click', () => this.startChordDetectorWhenReady(), { once: true });
 
-    // Toggle diagnostics overlay with "D"
     document.addEventListener('keydown', (e) => {
       if (this.isEditableTarget(e.target)) return;
       if (e.key.toLowerCase() === 'd' && this.diagEl) {
@@ -337,7 +370,6 @@ export class Renderer {
       }
     });
 
-    // Global playback and app shortcuts
     document.addEventListener('keydown', (e) => {
       if (this.isEditableTarget(e.target)) return;
       const key = e.key;
@@ -346,7 +378,7 @@ export class Renderer {
       const src = this.audioManager.getCurrentSource();
 
       switch (key) {
-        case ' ': // space toggles playback
+        case ' ':
           e.preventDefault();
           this.togglePlayback();
           break;
@@ -397,17 +429,14 @@ export class Renderer {
       }
     });
 
-    // Start the visualizer
     this.visualizer.start();
     requestAnimationFrame(this._updateLoop);
 
-    // Click-away to close floating control panels and context menus
     document.addEventListener('click', (e) => {
       this.maybeCloseFloatingPanels(e);
       this.hideQueueContextMenu();
       this.hideCoverArtContextMenu();
     });
-    // Escape to close panels
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         this.closeEq();
@@ -419,114 +448,7 @@ export class Renderer {
     });
   }
 
-  // Clear the queue and reset related UI bits
-  clearQueue() {
-    this.audioManager.clearQueue();
-    // Reset playback icons
-    this.syncPlaybackUi(false);
-    // Reset progress and labels
-    this.progressBar.value = 0;
-    this.trackDurationEl.textContent = '';
-    // Clear chord readout styling
-    if (this.chordReadout) {
-      this.chordReadout.textContent = '—';
-      this.chordReadout.classList.add('dim');
-      this.chordReadout.style.removeProperty('color');
-      this.chordReadout.style.removeProperty('background');
-      this.chordReadout.style.removeProperty('border-color');
-    }
-  }
-
-  // File handling
-  async addFiles() {
-    const files = await window.electronAPI.selectAudioFiles();
-    if (files.length > 0) {
-      this.audioManager.addFilesToQueue(files);
-    }
-  }
-
-  initDragAndDrop() {
-    const dropZone = document.body;
-    dropZone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      dropZone.classList.add('drag-over');
-    });
-
-    dropZone.addEventListener('dragleave', () => {
-      dropZone.classList.remove('drag-over');
-    });
-
-    dropZone.addEventListener('drop', async (e) => {
-      if (this.extractDroppedImagePath(e.dataTransfer)) {
-        e.preventDefault();
-        dropZone.classList.remove('drag-over');
-        return;
-      }
-      e.preventDefault();
-      dropZone.classList.remove('drag-over');
-      const allowed = new Set(['mp3','wav','ogg','m4a','flac','aac','mp4','m4v','webm']);
-      const dropped = [...e.dataTransfer.files]
-        .filter(f => {
-          const ext = (f.name.split('.').pop()||'').toLowerCase();
-          const mime = f.type || '';
-          const isAudio = mime.startsWith('audio/');
-          const isSupportedVideo = mime === 'video/mp4' || mime === 'video/x-m4v' || mime === 'video/webm';
-          const isSupportedAudioWebM = mime === 'audio/webm';
-          return isAudio || isSupportedVideo || isSupportedAudioWebM || allowed.has(ext);
-        });
-
-      if (dropped.length === 0) return;
-
-      // Normalize to safe file URLs via main process (cross‑platform correctness)
-      const paths = dropped.map(f => f.path).filter(Boolean);
-      const normalized = await window.electronAPI.pathsToFileUrls(paths);
-      if (normalized && normalized.length) this.audioManager.addFilesToQueue(normalized);
-    });
-  }
-
-  // Player controls
-  togglePlayback() {
-    const track = this.audioManager.getCurrentTrack();
-    if (!track) return;
-    if (this.audioManager.isPlaying) {
-      if (!this.audioManager.pause()) return;
-      // Stop chord detection when paused to save CPU and avoid flicker
-      this.chordDetector.stop();
-      this.detectorRunning = false;
-      this.syncPlaybackUi(false);
-    } else {
-      if (!this.audioManager.play()) return;
-      this.syncPlaybackUi(true);
-      this.startChordDetectorWhenReady(); // ensure detector starts when playback begins
-    }
-  }
-
-  nextTrack() {
-    if (!this.audioManager.getQueue().length) return;
-    this.audioManager.playNext();
-    this.syncPlaybackUi(true);
-  }
-
-  prevTrack() {
-    if (!this.audioManager.getQueue().length) return;
-    this.audioManager.playPrev();
-    this.syncPlaybackUi(true);
-  }
-  
-  seekTrack(value) {
-    this.audioManager.seek(value / 100);
-    // Refresh UI when seeking while paused
-    this.updateProgressBar();
-  }
-
-  // UI rendering
-  updateTrackInfo(track) {
-    const name = track ? this.getDisplayName(track) : 'No track loaded';
-    this.trackNameEl.textContent = name;
-    this.progressBar.value = 0;
-    this.trackDurationEl.textContent = track ? '0:00 / ' + this.formatTime(track.duration) : '';
-  }
-
+  // Cover Art Operations
   async updateCoverArt(track) {
     const requestId = ++this.pendingCoverRequest;
     const coverArt = await this.ensureTrackCoverArt(track);
@@ -558,7 +480,7 @@ export class Renderer {
         track.meta = { ...(track.meta || {}), ...(res.tags || {}) };
       }
     } catch {
-      // Ignore read errors and fall through to placeholder rendering.
+      // ignore
     }
     if (track.meta?.coverArt?.url) return track.meta.coverArt;
     const pictureUrl = this.getCoverArtDataUrl(track);
@@ -763,488 +685,6 @@ export class Renderer {
     if (this.vizControls && !this.vizControls.classList.contains('hidden')) this.initVizControls();
   }
 
-  handlePlaybackEnd() {
-    this.nextTrack();
-  }
-
-  renderQueue() {
-    this.queueEl.innerHTML = '';
-    this.audioManager.getQueue().forEach((track, index) => {
-      const li = document.createElement('li');
-      li.className = 'queue-item';
-      if (index === this.audioManager.getCurrentIndex()) {
-        li.classList.add('playing');
-      }
-      li.textContent = this.getDisplayName(track);
-      li.dataset.index = index;
-      // Drag & Drop reordering
-      li.draggable = true;
-      li.addEventListener('dragstart', (e) => {
-        e.dataTransfer.setData('text/plain', String(index));
-        e.dataTransfer.effectAllowed = 'move';
-      });
-      li.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-      });
-      li.addEventListener('drop', (e) => {
-        e.preventDefault();
-        const from = Number(e.dataTransfer.getData('text/plain'));
-        const to = Number(li.dataset.index);
-        if (!Number.isNaN(from) && !Number.isNaN(to)) {
-          this.audioManager.moveTrack(from, to);
-        }
-      });
-      li.addEventListener('click', () => {
-        this.audioManager.playTrack(index);
-        this.syncPlaybackUi(true);
-      });
-      // Right-click context menu for queue actions
-      li.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        this.showQueueContextMenu(e, index);
-      });
-      this.queueEl.appendChild(li);
-    });
-  }
-
-  // Header Dropdown Menu
-  initAppMenu() {
-    if (!this.appMenuBtn || !this.appMenu) return;
-    // Ensure the menu is not inside a draggable titlebar region; move to body
-    try {
-      if (this.appMenu.parentElement !== document.body) {
-        document.body.appendChild(this.appMenu);
-      }
-      this.appMenu.style.position = 'fixed';
-      this.appMenu.setAttribute('aria-hidden', 'true');
-      this.appMenuBtn.setAttribute('aria-haspopup', 'menu');
-      this.appMenuBtn.setAttribute('aria-expanded', 'false');
-    } catch { /* ignore */ }
-    const openMenu = (e) => {
-      // Avoid default to prevent interference with drag, but no need to fully preventDefault
-      try { e.stopPropagation(); } catch { /* ignore */ }
-      this.buildAppMenu();
-      this.positionAppMenu();
-      this.showAppMenu();
-      this._menuJustOpenedAt = Date.now();
-      this._menuJustOpened = true;
-      clearTimeout(this._menuOpenTimer);
-      this._menuOpenTimer = setTimeout(() => { this._menuJustOpened = false; }, 500);
-    };
-    // Prefer click/keyboard activation; add multiple event types to handle platform quirks
-    this.appMenuBtn.addEventListener('pointerdown', openMenu);
-    this.appMenuBtn.addEventListener('mousedown', openMenu);
-    this.appMenuBtn.addEventListener('click', openMenu);
-    this.appMenuBtn.addEventListener('touchstart', openMenu, { passive: true });
-    this.appMenuBtn.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') openMenu(e);
-    });
-    // Close when clicking outside
-    document.addEventListener('click', (e) => {
-      if (!this.appMenu || this.appMenu.classList.contains('hidden')) return;
-      if (this._menuJustOpened) return; // ignore the first click after opening
-      if (this.appMenu.contains(e.target) || this.appMenuBtn.contains(e.target)) return;
-      this.hideAppMenu();
-    });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.hideAppMenu(); });
-  }
-
-  positionAppMenu() {
-    try {
-      // Anchor menu under the button relative to viewport
-      const btnRect = this.appMenuBtn.getBoundingClientRect();
-      const left = Math.max(8, Math.round(btnRect.left));
-      const top = Math.round(btnRect.bottom + 6);
-      this.appMenu.style.left = `${left}px`;
-      this.appMenu.style.top = `${top}px`;
-    } catch { /* fallback to CSS defaults */ }
-  }
-
-  buildAppMenu() {
-    if (!this.appMenu) return;
-    this.appMenu.innerHTML = '';
-    this.appMenu.setAttribute('role', 'menu');
-
-    const addItem = (label, onClick, opts = {}) => {
-      const it = document.createElement('div');
-      it.className = 'menu-item' + (opts.destructive ? ' destructive' : '');
-      it.textContent = label;
-      it.tabIndex = 0;
-      it.setAttribute('role', 'menuitem');
-      it.addEventListener('click', (e) => { e.stopPropagation(); onClick?.(); this.hideAppMenu(); });
-      it.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(); this.hideAppMenu(); } });
-      this.appMenu.appendChild(it);
-      return it;
-    };
-    const addSeparator = () => {
-      const sep = document.createElement('div'); sep.className = 'menu-separator'; this.appMenu.appendChild(sep);
-    };
-
-    // EQ quick open
-    addItem('Equalizer…', () => this.toggleEq());
-    // EQ Presets
-    const eqPresetRow = document.createElement('div'); eqPresetRow.className = 'menu-row';
-    const eqPresetLbl = document.createElement('span'); eqPresetLbl.textContent = 'EQ Preset';
-    const eqPresetSelect = document.createElement('select');
-    const builtins = BUILTIN_EQ_PRESETS;
-    Object.keys(builtins).forEach(n => { const o = document.createElement('option'); o.value = `builtin:${n}`; o.textContent = n; eqPresetSelect.appendChild(o); });
-    const custom = getCustomEqPresets();
-    Object.keys(custom).forEach(n => { const o = document.createElement('option'); o.value = `custom:${n}`; o.textContent = n; eqPresetSelect.appendChild(o); });
-    eqPresetSelect.addEventListener('change', (e) => {
-      const v = e.target.value || '';
-      if (!v) return;
-      const [kind, name] = v.split(':');
-      const map = kind === 'builtin' ? builtins : custom;
-      const gains = map[name];
-      if (Array.isArray(gains)) this.setEqGains(gains, true);
-    });
-    eqPresetRow.appendChild(eqPresetLbl); eqPresetRow.appendChild(eqPresetSelect); this.appMenu.appendChild(eqPresetRow);
-
-    // Save current as preset
-    const eqSaveRow = document.createElement('div'); eqSaveRow.className = 'menu-row';
-    const nameInput = document.createElement('input'); nameInput.type = 'text'; nameInput.placeholder = 'Preset name'; nameInput.style.flex = '1';
-    const saveBtn = document.createElement('button'); saveBtn.className = 'inline-btn'; saveBtn.textContent = 'Save';
-    saveBtn.addEventListener('click', () => { const n = nameInput.value.trim(); if (!n) return; this.saveCustomEqPreset(n); this.buildAppMenu(); });
-    eqSaveRow.appendChild(nameInput); eqSaveRow.appendChild(saveBtn); this.appMenu.appendChild(eqSaveRow);
-    if (Object.keys(custom).length) {
-      const eqDelRow = document.createElement('div'); eqDelRow.className = 'menu-row';
-      const delSelect = document.createElement('select');
-      Object.keys(custom).forEach(n => { const o = document.createElement('option'); o.value = n; o.textContent = n; delSelect.appendChild(o); });
-      const delBtn = document.createElement('button'); delBtn.className = 'inline-btn'; delBtn.textContent = 'Delete';
-      delBtn.addEventListener('click', () => { const n = delSelect.value; if (!n) return; this.deleteCustomEqPreset(n); this.buildAppMenu(); });
-      eqDelRow.appendChild(delSelect); eqDelRow.appendChild(delBtn); this.appMenu.appendChild(eqDelRow);
-    }
-
-    addSeparator();
-
-    // Visualization mode
-    const vizRow = document.createElement('div'); vizRow.className = 'menu-row';
-    const vizLbl = document.createElement('span'); vizLbl.textContent = 'Visualization Mode';
-    const vizSelect = document.createElement('select');
-    ;['orb','bars','wave','spectrogram','particles','cover','video'].forEach(m => {
-      const opt = document.createElement('option'); opt.value = m; opt.textContent = m[0].toUpperCase() + m.slice(1);
-      if (this.getVizMode() === m) opt.selected = true;
-      vizSelect.appendChild(opt);
-    });
-    vizSelect.addEventListener('change', (e) => {
-      const m = this.setVizMode(e.target.value);
-      if (m !== 'video' && this.visualizer.setMode) this.visualizer.setMode(m);
-      if (m !== 'video') this.prevNonVideoMode = m;
-      this.updateVisualizationUi(m);
-      this.updateVideoModeUi();
-      if (m !== 'video') this.visualizer.draw();
-    });
-    vizRow.appendChild(vizLbl); vizRow.appendChild(vizSelect); this.appMenu.appendChild(vizRow);
-    addItem('Visualization Settings…', () => this.toggleVizControls());
-    // Reset Visualization settings to defaults (theme + per-mode config)
-    addItem('Reset Visualization Settings', () => {
-      try {
-        localStorage.removeItem('vizConfig');
-        localStorage.removeItem('vizTheme');
-        // Apply defaults to the live visualizer if available
-        const defaults = {
-          orb: { scale: 0.4 },
-          bars: { count: 160 },
-          wave: { thickness: 2 },
-          spectrogram: { speed: 1 },
-          particles: { intensity: 1 }
-        };
-        if (this.visualizer?.setTheme) this.visualizer.setTheme('neon');
-        if (this.visualizer?.setConfig) {
-          Object.keys(defaults).forEach(m => this.visualizer.setConfig(m, defaults[m]));
-        }
-        // If the panel is open, rebuild it to reflect cleared state
-        if (this.vizControls && !this.vizControls.classList.contains('hidden')) {
-          this.vizControls.dataset.initialized = '';
-          this.initVizControls();
-        }
-      } catch { /* ignore */ }
-    });
-
-    addSeparator();
-
-    // Chords
-    addItem(this.chordsEnabled ? 'Chords: On' : 'Chords: Off', () => this.toggleChords());
-    const chordRow = document.createElement('div'); chordRow.className = 'menu-row';
-    const chordLbl = document.createElement('span'); chordLbl.textContent = 'Chord Mode';
-    const chordSelect = document.createElement('select');
-    ;['lowcpu','responsive','normal','accurate'].forEach(m => {
-      const opt = document.createElement('option'); opt.value = m; opt.textContent = m[0].toUpperCase() + m.slice(1);
-      if ((this.chordMode || 'normal') === m) opt.selected = true;
-      chordSelect.appendChild(opt);
-    });
-    chordSelect.addEventListener('change', (e) => {
-      this.chordMode = e.target.value;
-      localStorage.setItem('chordMode', this.chordMode);
-      this.applyChordMode(this.chordMode);
-      this.updateChordToggleUi();
-    });
-    chordRow.appendChild(chordLbl); chordRow.appendChild(chordSelect); this.appMenu.appendChild(chordRow);
-
-    addSeparator();
-    addItem(document.body.classList.contains('dark-mode') ? 'Light Mode' : 'Dark Mode', () => this.toggleDarkMode());
-    addSeparator();
-
-    // Saved Queues
-    addItem('Save Queue As…', () => this.openQueueSaveModal());
-    const saved = getSavedQueues();
-    if (Object.keys(saved).length) {
-      const loadRow = document.createElement('div'); loadRow.className = 'menu-row';
-      const loadLbl = document.createElement('span'); loadLbl.textContent = 'Load Queue';
-      const loadSelect = document.createElement('select');
-      const def = document.createElement('option'); def.value = ''; def.textContent = 'Select…'; loadSelect.appendChild(def);
-      Object.keys(saved).sort().forEach(name => { const opt = document.createElement('option'); opt.value = name; opt.textContent = name; loadSelect.appendChild(opt); });
-      loadSelect.addEventListener('change', async (e) => { const name = e.target.value; if (name) { await this.loadQueueByName(name); this.hideAppMenu(); } });
-      loadRow.appendChild(loadLbl); loadRow.appendChild(loadSelect); this.appMenu.appendChild(loadRow);
-      const manageRow = document.createElement('div'); manageRow.className = 'menu-row';
-      const delBtn = document.createElement('button'); delBtn.className = 'inline-btn'; delBtn.textContent = 'Delete Selected';
-      delBtn.addEventListener('click', () => { const name = loadSelect.value; if (!name) return; this.deleteSavedQueue(name); this.buildAppMenu(); });
-      manageRow.appendChild(delBtn); this.appMenu.appendChild(manageRow);
-    }
-  }
-
-  toggleAppMenu() { this.appMenu.classList.toggle('hidden'); const open = !this.appMenu.classList.contains('hidden'); this.appMenuBtn?.setAttribute('aria-expanded', open ? 'true' : 'false'); this.appMenu.setAttribute('aria-hidden', open ? 'false' : 'true'); }
-  showAppMenu() { this.appMenu.classList.remove('hidden'); this.appMenuBtn?.setAttribute('aria-expanded', 'true'); this.appMenu.setAttribute('aria-hidden', 'false'); }
-  hideAppMenu() {
-    // Avoid immediately closing on the same interaction that opened it
-    if (this._menuJustOpenedAt && (Date.now() - this._menuJustOpenedAt) < 200) return;
-    this.appMenu.classList.add('hidden');
-    this.appMenuBtn?.setAttribute('aria-expanded', 'false');
-    this.appMenu.setAttribute('aria-hidden', 'true');
-  }
-
-  // Saved queues
-
-  saveQueueAs() {
-    const name = safePrompt('Save queue as:', '');
-    if (!name) return;
-    const q = this.audioManager.getQueue().map(t => ({ path: t.path, name: t.name }));
-    const all = getSavedQueues();
-    all[name] = { items: q, savedAt: Date.now() };
-    setSavedQueues(all);
-  }
-
-  openQueueSaveModal() {
-    if (!this.queueSaveModal) return;
-    this.queueNameInput.value = '';
-    this.queueSaveModal.classList.remove('hidden');
-    this.queueSaveModal.classList.remove('closing');
-    this.queueSaveModal.setAttribute('aria-hidden', 'false');
-    this.queueNameInput.focus();
-  }
-  initQueueSaveUi() {
-    this.queueSaveModal = document.getElementById('queue-save-modal');
-    this.queueNameInput = document.getElementById('queue-name-input');
-    this.queueSaveConfirmBtn = document.getElementById('queue-save-confirm');
-    this.queueSaveCancelBtn = document.getElementById('queue-save-cancel');
-    if (!this.queueSaveModal) return;
-    if (this.queueSaveCancelBtn) this.queueSaveCancelBtn.addEventListener('click', () => this.closeQueueSaveModal());
-    this.queueSaveModal.addEventListener('click', (ev) => { if (ev.target === this.queueSaveModal) this.closeQueueSaveModal(); });
-    if (this.queueSaveConfirmBtn) this.queueSaveConfirmBtn.addEventListener('click', () => this.saveQueueFromModal());
-    if (this.queueNameInput) this.queueNameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); this.saveQueueFromModal(); } });
-  }
-  closeQueueSaveModal() {
-    if (!this.queueSaveModal) return;
-    this.queueSaveModal.classList.add('closing');
-    const onEnd = () => {
-      this.queueSaveModal.classList.add('hidden');
-      this.queueSaveModal.classList.remove('closing');
-      this.queueSaveModal.setAttribute('aria-hidden', 'true');
-      this.queueSaveModal.removeEventListener('animationend', onEnd, true);
-    };
-    this.queueSaveModal.addEventListener('animationend', onEnd, true);
-  }
-  saveQueueFromModal() {
-    const name = (this.queueNameInput?.value || '').trim();
-    if (!name) return;
-    const all = getSavedQueues();
-    if (all[name]) {
-      const overwrite = safeConfirm(`A queue named "${name}" already exists. Overwrite?`, false);
-      if (!overwrite) return;
-    }
-    const q = this.audioManager.getQueue().map(t => ({ path: t.path, name: t.name }));
-    all[name] = { items: q, savedAt: Date.now() };
-    setSavedQueues(all);
-    this.closeQueueSaveModal();
-  }
-  async loadQueueByName(name) {
-    const all = getSavedQueues();
-    const entry = all[name];
-    if (!entry || !Array.isArray(entry.items)) return;
-    const paths = entry.items.map(i => i.path);
-    // Check which exist on disk first
-    let exists = [];
-    try { exists = await window.electronAPI.checkPathsExist(paths); } catch { exists = paths.map(() => true); }
-    const present = entry.items.filter((_, i) => exists[i]);
-    const missing = entry.items.filter((_, i) => !exists[i]);
-    if (missing.length) {
-      safeAlert(`Some files could not be found and were skipped:\n\n` + missing.map(m => `• ${m.name}`).join('\n'));
-    }
-    this.audioManager.clearQueue();
-    if (present.length) {
-      const normalized = await window.electronAPI.pathsToFileUrls(present.map(i => i.path));
-      await this.audioManager.addFilesToQueue(normalized);
-    }
-  }
-  deleteSavedQueue(name) {
-    const all = getSavedQueues();
-    delete all[name];
-    setSavedQueues(all);
-  }
-
-  // EQ and visualizer
-  initEqControls() {
-    const savedGains = (() => { try { return JSON.parse(localStorage.getItem('eqGains') || '[]'); } catch { return []; } })();
-    this.audioManager.getFilters().forEach((filter, i) => {
-      const container = document.createElement('div');
-      container.className = 'slider-container';
-
-      const label = document.createElement('label');
-      label.textContent = filter.frequency.value < 1000 ? `${filter.frequency.value}Hz` : `${filter.frequency.value / 1000}kHz`;
-      label.className = 'freq-label';
-      label.setAttribute('for', `eq-slider-${i}`);
-
-      const slider = document.createElement('input');
-      slider.type = 'range';
-      slider.id = `eq-slider-${i}`;
-      slider.className = 'eq-slider';
-      slider.min = -20;
-      slider.max = 20;
-      slider.step = 1;
-      slider.value = (typeof savedGains[i] !== 'undefined') ? savedGains[i] : 0;
-      slider.dataset.index = i;
-
-      // Apply saved gain immediately
-      if (typeof savedGains[i] !== 'undefined') {
-        this.audioManager.setEqGain(i, savedGains[i]);
-      }
-
-      slider.addEventListener('input', (e) => {
-        const idx = Number(e.target.dataset.index);
-        const val = Number(e.target.value);
-        this.audioManager.setEqGain(idx, val);
-        const arr = (() => { try { return JSON.parse(localStorage.getItem('eqGains') || '[]'); } catch { return []; } })();
-        arr[idx] = val;
-        localStorage.setItem('eqGains', JSON.stringify(arr));
-      });
-
-      container.appendChild(label);
-      container.appendChild(slider);
-      this.eqControls.appendChild(container);
-      this.eqSliderEls[i] = slider;
-    });
-  }
-
-  // EQ Presets helpers
-
-  saveCustomEqPreset(name) {
-    const gains = this.getCurrentEqGains();
-    const all = getCustomEqPresets();
-    all[name] = gains;
-    setCustomEqPresets(all);
-  }
-  deleteCustomEqPreset(name) {
-    const all = getCustomEqPresets();
-    delete all[name];
-    setCustomEqPresets(all);
-  }
-  getCurrentEqGains() {
-    try { return this.audioManager.getFilters().map(f => Number(f.gain.value) || 0); } catch { return []; }
-  }
-  setEqGains(gains, persist) {
-    if (!Array.isArray(gains)) return;
-    gains.forEach((g, i) => {
-      this.audioManager.setEqGain(i, g);
-      if (this.eqSliderEls[i]) this.eqSliderEls[i].value = String(g);
-    });
-    if (persist) {
-      localStorage.setItem('eqGains', JSON.stringify(gains));
-    }
-  }
-
-  toggleEq() {
-    this.eqControls.classList.toggle('hidden');
-    this.toggleEqBtn.classList.toggle('active');
-  }
-
-  closeEq() {
-    if (!this.eqControls.classList.contains('hidden')) {
-      this.eqControls.classList.add('hidden');
-      this.toggleEqBtn.classList.remove('active');
-    }
-  }
-
-  toggleVizControls() {
-    this.vizControls.classList.toggle('hidden');
-    if (!this.vizControls.dataset.initialized) {
-      this.initVizControls();
-      this.vizControls.dataset.initialized = '1';
-    }
-  }
-
-  closeVizControls() {
-    if (!this.vizControls.classList.contains('hidden')) {
-      this.vizControls.classList.add('hidden');
-    }
-  }
-
-  maybeCloseFloatingPanels(e) {
-    const path = e.composedPath ? e.composedPath() : [];
-    const clickedEq = path.includes(this.eqControls) || path.includes(this.toggleEqBtn);
-    const clickedViz = path.includes(this.vizControls) || path.includes(this.visualSettingsBtn);
-    if (!clickedEq) this.closeEq();
-    if (!clickedViz) this.closeVizControls();
-  }
-
-  // Queue context menu
-  ensureQueueContextMenu() {
-    if (this.queueCtx) return this.queueCtx;
-    const menu = document.createElement('div');
-    menu.id = 'queue-context-menu';
-    menu.className = 'context-menu hidden';
-    const optPlay = document.createElement('div'); optPlay.className = 'context-item'; optPlay.textContent = 'Play';
-    const optPlayNext = document.createElement('div'); optPlayNext.className = 'context-item'; optPlayNext.textContent = 'Play next';
-    const optEdit = document.createElement('div'); optEdit.className = 'context-item'; optEdit.textContent = 'Edit tags';
-    const optReveal = document.createElement('div'); optReveal.className = 'context-item'; optReveal.textContent = 'Reveal in folder';
-    const sep = document.createElement('div'); sep.className = 'context-separator';
-    const optRemove = document.createElement('div'); optRemove.className = 'context-item destructive'; optRemove.textContent = 'Remove from queue';
-    menu.appendChild(optPlay); menu.appendChild(optPlayNext); menu.appendChild(optEdit); menu.appendChild(optReveal); menu.appendChild(sep); menu.appendChild(optRemove);
-    document.body.appendChild(menu);
-    this.queueCtx = { el: menu, optPlay, optPlayNext, optReveal, optRemove, optEdit };
-    return this.queueCtx;
-  }
-
-  showQueueContextMenu(e, index) {
-    const ctx = this.ensureQueueContextMenu();
-    const { el, optPlay, optPlayNext, optReveal, optRemove, optEdit } = ctx;
-    const left = Number(e.clientX) || 0;
-    const top = Number(e.clientY) || 0;
-    el.style.left = `${left}px`;
-    el.style.top = `${top}px`;
-    el.classList.remove('hidden');
-    if (typeof window !== 'undefined' && typeof requestAnimationFrame === 'function') {
-      requestAnimationFrame(() => {
-        const rect = el.getBoundingClientRect();
-        const margin = 8;
-        const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
-        const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
-        el.style.left = `${Math.min(Math.max(margin, left), maxLeft)}px`;
-        el.style.top = `${Math.min(Math.max(margin, top), maxTop)}px`;
-      });
-    }
-    const off = () => this.hideQueueContextMenu();
-    optPlay.onclick = () => { this.audioManager.playTrack(index); off(); };
-    optPlayNext.onclick = () => { this.audioManager.moveTrackToNext(index); off(); };
-    optReveal.onclick = () => { const t = this.audioManager.getQueue()[index]; if (t) window.electronAPI.revealInFolder(t.path); off(); };
-    optRemove.onclick = () => { this.audioManager.removeTrackAt(index); off(); };
-    optEdit.onclick = () => { this.openMetadataModalForIndex(index); off(); };
-  }
-
-  hideQueueContextMenu() {
-    if (this.queueCtx?.el) this.queueCtx.el.classList.add('hidden');
-  }
-
   ensureCoverArtContextMenu() {
     if (this.coverCtx) return this.coverCtx;
     const menu = document.createElement('div');
@@ -1298,9 +738,199 @@ export class Renderer {
     if (this.coverCtx?.el) this.coverCtx.el.classList.add('hidden');
   }
 
-  // Metadata overrides: UI + helpers
+  // App Menu UI Controls
+  initAppMenu() {
+    if (!this.appMenuBtn || !this.appMenu) return;
+    try {
+      if (this.appMenu.parentElement !== document.body) {
+        document.body.appendChild(this.appMenu);
+      }
+      this.appMenu.style.position = 'fixed';
+      this.appMenu.setAttribute('aria-hidden', 'true');
+      this.appMenuBtn.setAttribute('aria-haspopup', 'menu');
+      this.appMenuBtn.setAttribute('aria-expanded', 'false');
+    } catch { /* ignore */ }
+    const openMenu = (e) => {
+      try { e.stopPropagation(); } catch { /* ignore */ }
+      this.buildAppMenu();
+      this.positionAppMenu();
+      this.showAppMenu();
+      this._menuJustOpenedAt = Date.now();
+      this._menuJustOpened = true;
+      clearTimeout(this._menuOpenTimer);
+      this._menuOpenTimer = setTimeout(() => { this._menuJustOpened = false; }, 500);
+    };
+    this.appMenuBtn.addEventListener('pointerdown', openMenu);
+    this.appMenuBtn.addEventListener('mousedown', openMenu);
+    this.appMenuBtn.addEventListener('click', openMenu);
+    this.appMenuBtn.addEventListener('touchstart', openMenu, { passive: true });
+    this.appMenuBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') openMenu(e);
+    });
+    document.addEventListener('click', (e) => {
+      if (!this.appMenu || this.appMenu.classList.contains('hidden')) return;
+      if (this._menuJustOpened) return;
+      if (this.appMenu.contains(e.target) || this.appMenuBtn.contains(e.target)) return;
+      this.hideAppMenu();
+    });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') this.hideAppMenu(); });
+  }
+
+  positionAppMenu() {
+    try {
+      const btnRect = this.appMenuBtn.getBoundingClientRect();
+      const left = Math.max(8, Math.round(btnRect.left));
+      const top = Math.round(btnRect.bottom + 6);
+      this.appMenu.style.left = `${left}px`;
+      this.appMenu.style.top = `${top}px`;
+    } catch { /* ignore */ }
+  }
+
+  buildAppMenu() {
+    if (!this.appMenu) return;
+    this.appMenu.innerHTML = '';
+    this.appMenu.setAttribute('role', 'menu');
+
+    const addItem = (label, onClick, opts = {}) => {
+      const it = document.createElement('div');
+      it.className = 'menu-item' + (opts.destructive ? ' destructive' : '');
+      it.textContent = label;
+      it.tabIndex = 0;
+      it.setAttribute('role', 'menuitem');
+      it.addEventListener('click', (e) => { e.stopPropagation(); onClick?.(); this.hideAppMenu(); });
+      it.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick?.(); this.hideAppMenu(); } });
+      this.appMenu.appendChild(it);
+      return it;
+    };
+    const addSeparator = () => {
+      const sep = document.createElement('div'); sep.className = 'menu-separator'; this.appMenu.appendChild(sep);
+    };
+
+    addItem('Equalizer…', () => this.toggleEq());
+    const eqPresetRow = document.createElement('div'); eqPresetRow.className = 'menu-row';
+    const eqPresetLbl = document.createElement('span'); eqPresetLbl.textContent = 'EQ Preset';
+    const eqPresetSelect = document.createElement('select');
+    const builtins = BUILTIN_EQ_PRESETS;
+    Object.keys(builtins).forEach(n => { const o = document.createElement('option'); o.value = `builtin:${n}`; o.textContent = n; eqPresetSelect.appendChild(o); });
+    const custom = getCustomEqPresets();
+    Object.keys(custom).forEach(n => { const o = document.createElement('option'); o.value = `custom:${n}`; o.textContent = n; eqPresetSelect.appendChild(o); });
+    eqPresetSelect.addEventListener('change', (e) => {
+      const v = e.target.value || '';
+      if (!v) return;
+      const [kind, name] = v.split(':');
+      const map = kind === 'builtin' ? builtins : custom;
+      const gains = map[name];
+      if (Array.isArray(gains)) this.setEqGains(gains, true);
+    });
+    eqPresetRow.appendChild(eqPresetLbl); eqPresetRow.appendChild(eqPresetSelect); this.appMenu.appendChild(eqPresetRow);
+
+    const eqSaveRow = document.createElement('div'); eqSaveRow.className = 'menu-row';
+    const nameInput = document.createElement('input'); nameInput.type = 'text'; nameInput.placeholder = 'Preset name'; nameInput.style.flex = '1';
+    const saveBtn = document.createElement('button'); saveBtn.className = 'inline-btn'; saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', () => { const n = nameInput.value.trim(); if (!n) return; this.saveCustomEqPreset(n); this.buildAppMenu(); });
+    eqSaveRow.appendChild(nameInput); eqSaveRow.appendChild(saveBtn); this.appMenu.appendChild(eqSaveRow);
+    if (Object.keys(custom).length) {
+      const eqDelRow = document.createElement('div'); eqDelRow.className = 'menu-row';
+      const delSelect = document.createElement('select');
+      Object.keys(custom).forEach(n => { const o = document.createElement('option'); o.value = n; o.textContent = n; delSelect.appendChild(o); });
+      const delBtn = document.createElement('button'); delBtn.className = 'inline-btn'; delBtn.textContent = 'Delete';
+      delBtn.addEventListener('click', () => { const n = delSelect.value; if (!n) return; this.deleteCustomEqPreset(n); this.buildAppMenu(); });
+      eqDelRow.appendChild(delSelect); eqDelRow.appendChild(delBtn); this.appMenu.appendChild(eqDelRow);
+    }
+
+    addSeparator();
+
+    const vizRow = document.createElement('div'); vizRow.className = 'menu-row';
+    const vizLbl = document.createElement('span'); vizLbl.textContent = 'Visualization Mode';
+    const vizSelect = document.createElement('select');
+    ;['orb','bars','wave','spectrogram','particles','cover','video'].forEach(m => {
+      const opt = document.createElement('option'); opt.value = m; opt.textContent = m[0].toUpperCase() + m.slice(1);
+      if (this.getVizMode() === m) opt.selected = true;
+      vizSelect.appendChild(opt);
+    });
+    vizSelect.addEventListener('change', (e) => {
+      const m = this.setVizMode(e.target.value);
+      if (m !== 'video' && this.visualizer.setMode) this.visualizer.setMode(m);
+      if (m !== 'video') this.prevNonVideoMode = m;
+      this.updateVisualizationUi(m);
+      this.updateVideoModeUi();
+      if (m !== 'video') this.visualizer.draw();
+    });
+    vizRow.appendChild(vizLbl); vizRow.appendChild(vizSelect); this.appMenu.appendChild(vizRow);
+    addItem('Visualization Settings…', () => this.toggleVizControls());
+    addItem('Reset Visualization Settings', () => {
+      try {
+        localStorage.removeItem('vizConfig');
+        localStorage.removeItem('vizTheme');
+        const defaults = {
+          orb: { scale: 0.4 },
+          bars: { count: 160 },
+          wave: { thickness: 2 },
+          spectrogram: { speed: 1 },
+          particles: { intensity: 1 }
+        };
+        if (this.visualizer?.setTheme) this.visualizer.setTheme('neon');
+        if (this.visualizer?.setConfig) {
+          Object.keys(defaults).forEach(m => this.visualizer.setConfig(m, defaults[m]));
+        }
+        if (this.vizControls && !this.vizControls.classList.contains('hidden')) {
+          this.vizControls.dataset.initialized = '';
+          this.initVizControls();
+        }
+      } catch { /* ignore */ }
+    });
+
+    addSeparator();
+
+    addItem(this.chordsEnabled ? 'Chords: On' : 'Chords: Off', () => this.toggleChords());
+    const chordRow = document.createElement('div'); chordRow.className = 'menu-row';
+    const chordLbl = document.createElement('span'); chordLbl.textContent = 'Chord Mode';
+    const chordSelect = document.createElement('select');
+    ;['lowcpu','responsive','normal','accurate'].forEach(m => {
+      const opt = document.createElement('option'); opt.value = m; opt.textContent = m[0].toUpperCase() + m.slice(1);
+      if ((this.chordMode || 'normal') === m) opt.selected = true;
+      chordSelect.appendChild(opt);
+    });
+    chordSelect.addEventListener('change', (e) => {
+      this.chordMode = e.target.value;
+      localStorage.setItem('chordMode', this.chordMode);
+      this.applyChordMode(this.chordMode);
+      this.updateChordToggleUi();
+    });
+    chordRow.appendChild(chordLbl); chordRow.appendChild(chordSelect); this.appMenu.appendChild(chordRow);
+
+    addSeparator();
+    addItem(document.body.classList.contains('dark-mode') ? 'Light Mode' : 'Dark Mode', () => this.toggleDarkMode());
+    addSeparator();
+
+    addItem('Save Queue As…', () => this.openQueueSaveModal());
+    const saved = getSavedQueues();
+    if (Object.keys(saved).length) {
+      const loadRow = document.createElement('div'); loadRow.className = 'menu-row';
+      const loadLbl = document.createElement('span'); loadLbl.textContent = 'Load Queue';
+      const loadSelect = document.createElement('select');
+      const def = document.createElement('option'); def.value = ''; def.textContent = 'Select…'; loadSelect.appendChild(def);
+      Object.keys(saved).sort().forEach(name => { const opt = document.createElement('option'); opt.value = name; opt.textContent = name; loadSelect.appendChild(opt); });
+      loadSelect.addEventListener('change', async (e) => { const name = e.target.value; if (name) { await this.loadQueueByName(name); this.hideAppMenu(); } });
+      loadRow.appendChild(loadLbl); loadRow.appendChild(loadSelect); this.appMenu.appendChild(loadRow);
+      const manageRow = document.createElement('div'); manageRow.className = 'menu-row';
+      const delBtn = document.createElement('button'); delBtn.className = 'inline-btn'; delBtn.textContent = 'Delete Selected';
+      delBtn.addEventListener('click', () => { const name = loadSelect.value; if (!name) return; this.deleteSavedQueue(name); this.buildAppMenu(); });
+      manageRow.appendChild(delBtn); this.appMenu.appendChild(manageRow);
+    }
+  }
+
+  toggleAppMenu() { this.appMenu.classList.toggle('hidden'); const open = !this.appMenu.classList.contains('hidden'); this.appMenuBtn?.setAttribute('aria-expanded', open ? 'true' : 'false'); this.appMenu.setAttribute('aria-hidden', open ? 'false' : 'true'); }
+  showAppMenu() { this.appMenu.classList.remove('hidden'); this.appMenuBtn?.setAttribute('aria-expanded', 'true'); this.appMenu.setAttribute('aria-hidden', 'false'); }
+  hideAppMenu() {
+    if (this._menuJustOpenedAt && (Date.now() - this._menuJustOpenedAt) < 200) return;
+    this.appMenu.classList.add('hidden');
+    this.appMenuBtn?.setAttribute('aria-expanded', 'false');
+    this.appMenu.setAttribute('aria-hidden', 'true');
+  }
+
+  // Metadata Overrides UI & Form Controls
   initMetadataUi() {
-    // Wire modal if present
     this.metaModal = document.getElementById('metadata-modal');
     this.metaForm = document.getElementById('metadata-form');
     this.metaFields = {
@@ -1334,7 +964,6 @@ export class Renderer {
     const t = this.audioManager.getQueue()[index];
     if (!t || !this.metaModal) return;
     this.metaModal.dataset.path = t.path;
-    // If no meta loaded yet, try to load from file
     if (!t.meta) {
       try {
         const res = await window.electronAPI.readMetadata(t.path);
@@ -1347,11 +976,10 @@ export class Renderer {
     if (this.metaFields.album) this.metaFields.album.value = m.album || '';
     if (this.metaFields.year) this.metaFields.year.value = m.year || '';
     if (this.metaFields.genre) this.metaFields.genre.value = m.genre || '';
-    // Show with animation
     this.metaModal.classList.remove('hidden');
     this.metaModal.classList.remove('closing');
     this.metaModal.setAttribute('aria-hidden', 'false');
-    void this.metaModal.offsetWidth; // reflow to restart animation
+    void this.metaModal.offsetWidth;
   }
 
   closeMetadataModal() {
@@ -1378,18 +1006,14 @@ export class Renderer {
       genre: this.metaFields.genre ? this.metaFields.genre.value.trim() : ''
     };
 
-    // Try to write to file (MP3 supported); fall back to overrides only
     try { await window.electronAPI.writeMetadata(path, data); } catch { /* ignore */ }
 
-    // Persist in-app override so UI reflects immediately and supports formats we don't write
     this.metaOverrides[path] = data;
     localStorage.setItem('metadataOverrides', JSON.stringify(this.metaOverrides));
 
-    // Update cached meta on the track
     const t = this.audioManager.getQueue().find(tr => tr.path === path);
     if (t) t.meta = { ...(t.meta || {}), ...data };
 
-    // Refresh UI
     const curIdx = this.audioManager.getCurrentIndex();
     const cur = this.audioManager.getQueue()[curIdx];
     if (cur && cur.path === path) this.updateTrackInfo(cur);
@@ -1397,9 +1021,41 @@ export class Renderer {
     this.closeMetadataModal();
   }
 
-  toggleDarkMode() {
-    const enabled = document.body.classList.toggle('dark-mode');
-    localStorage.setItem('darkMode', enabled);
+  // Playback Control Utilities
+  togglePlayback() {
+    const track = this.audioManager.getCurrentTrack();
+    if (!track) return;
+    if (this.audioManager.isPlaying) {
+      if (!this.audioManager.pause()) return;
+      this.chordDetector.stop();
+      this.detectorRunning = false;
+      this.syncPlaybackUi(false);
+    } else {
+      if (!this.audioManager.play()) return;
+      this.syncPlaybackUi(true);
+      this.startChordDetectorWhenReady();
+    }
+  }
+
+  nextTrack() {
+    if (!this.audioManager.getQueue().length) return;
+    this.audioManager.playNext();
+    this.syncPlaybackUi(true);
+  }
+
+  prevTrack() {
+    if (!this.audioManager.getQueue().length) return;
+    this.audioManager.playPrev();
+    this.syncPlaybackUi(true);
+  }
+  
+  seekTrack(value) {
+    this.audioManager.seek(value / 100);
+    this.updateProgressBar();
+  }
+
+  handlePlaybackEnd() {
+    this.nextTrack();
   }
 
   toggleShuffle() {
@@ -1416,7 +1072,7 @@ export class Renderer {
     localStorage.setItem('repeat', on);
   }
 
-  // Visualization controls
+  // UI Visualization & Diagnostics Synchronization
   cycleVisualization() {
     const order = ['orb', 'bars', 'wave', 'spectrogram', 'particles', 'cover', 'video'];
     const current = this.getVizMode();
@@ -1446,145 +1102,6 @@ export class Renderer {
     this.initVideoOverlayHandlers();
   }
 
-  initVizControls() {
-    const cfg = (() => { try { return JSON.parse(localStorage.getItem('vizConfig') || '{}'); } catch { return {}; } })();
-    const theme = localStorage.getItem('vizTheme') || 'neon';
-    const el = this.vizControls;
-    el.innerHTML = '';
-    // Mode select
-    const modeRow = document.createElement('div');
-    const modeLabel = document.createElement('label');
-    modeLabel.textContent = 'Mode';
-    modeLabel.style.marginRight = '8px';
-    const modeSelect = document.createElement('select');
-    modeSelect.id = 'viz-mode-select';
-    modeLabel.setAttribute('for', modeSelect.id);
-    ['orb','bars','wave','spectrogram','particles','cover','video'].forEach(m => {
-      const opt = document.createElement('option');
-      opt.value = m; opt.textContent = m[0].toUpperCase() + m.slice(1);
-      if (this.getVizMode() === m) opt.selected = true;
-      modeSelect.appendChild(opt);
-    });
-    modeSelect.addEventListener('change', (e) => {
-      const m = this.setVizMode(e.target.value);
-      if (m !== 'video' && this.visualizer.setMode) this.visualizer.setMode(m);
-      if (m !== 'video') this.prevNonVideoMode = m;
-      this.updateVisualizationUi(m);
-      this.updateVideoModeUi();
-      if (m !== 'video') this.visualizer.draw();
-    });
-    modeRow.appendChild(modeLabel);
-    modeRow.appendChild(modeSelect);
-    el.appendChild(modeRow);
-
-    // Theme select
-    const themeRow = document.createElement('div');
-    themeRow.style.marginTop = '8px';
-    const themeLabel = document.createElement('label');
-    themeLabel.textContent = 'Theme';
-    themeLabel.style.marginRight = '8px';
-    const themeSelect = document.createElement('select');
-    themeSelect.id = 'viz-theme-select';
-    themeLabel.setAttribute('for', themeSelect.id);
-    ['neon','sunset','aurora','ocean','mono'].forEach(t => {
-      const opt = document.createElement('option');
-      opt.value = t; opt.textContent = t[0].toUpperCase() + t.slice(1);
-      if (theme === t) opt.selected = true;
-      themeSelect.appendChild(opt);
-    });
-    themeSelect.addEventListener('change', (e) => {
-      const t = e.target.value;
-      if (this.visualizer.setTheme) this.visualizer.setTheme(t);
-      localStorage.setItem('vizTheme', t);
-      if (this.getVizMode() !== 'video') this.visualizer.draw();
-    });
-    themeRow.appendChild(themeLabel);
-    themeRow.appendChild(themeSelect);
-    el.appendChild(themeRow);
-
-    // Per-mode controls
-    let vizControlIndex = 0;
-    const addSlider = (labelText, min, max, step, value, onInput) => {
-      const row = document.createElement('div');
-      row.style.marginTop = '8px';
-      const label = document.createElement('label');
-      label.textContent = labelText;
-      label.style.marginRight = '8px';
-      const input = document.createElement('input');
-      input.type = 'range'; input.min = String(min); input.max = String(max); input.step = String(step); input.value = String(value);
-      input.id = `viz-control-${vizControlIndex++}`;
-      input.setAttribute('aria-label', `${labelText} setting`);
-      label.setAttribute('for', input.id);
-      input.addEventListener('input', (e) => onInput(Number(e.target.value)));
-      row.appendChild(label);
-      row.appendChild(input);
-      el.appendChild(row);
-    };
-
-    const currentTrack = this.audioManager.getCurrentTrack();
-    const hasTrack = !!currentTrack?.path;
-    const hasCustomCover = !!(hasTrack && currentTrack?.meta?.coverArt?.source === 'override');
-    const coverRow = document.createElement('div');
-    coverRow.style.marginTop = '8px';
-    const coverLabel = document.createElement('label');
-    coverLabel.textContent = 'Cover Art';
-    coverLabel.style.marginRight = '8px';
-    const uploadBtn = document.createElement('button');
-    uploadBtn.type = 'button';
-    uploadBtn.className = 'inline-btn';
-    uploadBtn.textContent = hasCustomCover ? 'Replace Image' : 'Upload Image';
-    uploadBtn.disabled = !hasTrack;
-    uploadBtn.addEventListener('click', () => this.uploadCustomCoverArt());
-    coverRow.appendChild(coverLabel);
-    coverRow.appendChild(uploadBtn);
-    if (hasCustomCover) {
-      const removeBtn = document.createElement('button');
-      removeBtn.type = 'button';
-      removeBtn.className = 'inline-btn';
-      removeBtn.style.marginLeft = '8px';
-      removeBtn.textContent = 'Use Embedded';
-      removeBtn.addEventListener('click', () => this.removeCustomCoverArt());
-      coverRow.appendChild(removeBtn);
-    }
-    el.appendChild(coverRow);
-
-    // Bars: count
-    addSlider('Bars', 32, 256, 8, cfg?.bars?.count ?? 160, (val) => {
-      const c = cfg.bars || (cfg.bars = {}); c.count = val;
-      if (this.visualizer.setConfig) this.visualizer.setConfig('bars', { count: val });
-      localStorage.setItem('vizConfig', JSON.stringify(cfg));
-    });
-
-    // Wave: thickness
-    addSlider('Wave', 1, 6, 1, cfg?.wave?.thickness ?? 2, (val) => {
-      const c = cfg.wave || (cfg.wave = {}); c.thickness = val;
-      if (this.visualizer.setConfig) this.visualizer.setConfig('wave', { thickness: val });
-      localStorage.setItem('vizConfig', JSON.stringify(cfg));
-    });
-
-    // Spectrogram: speed
-    addSlider('Scroll', 1, 4, 1, cfg?.spectrogram?.speed ?? 1, (val) => {
-      const c = cfg.spectrogram || (cfg.spectrogram = {}); c.speed = val;
-      if (this.visualizer.setConfig) this.visualizer.setConfig('spectrogram', { speed: val });
-      localStorage.setItem('vizConfig', JSON.stringify(cfg));
-    });
-
-    // Particles: intensity
-    addSlider('Particles', 0, 2, 0.1, cfg?.particles?.intensity ?? 1, (val) => {
-      const c = cfg.particles || (cfg.particles = {}); c.intensity = val;
-      if (this.visualizer.setConfig) this.visualizer.setConfig('particles', { intensity: val });
-      localStorage.setItem('vizConfig', JSON.stringify(cfg));
-    });
-
-    // Orb: scale
-    addSlider('Orb size', 0.2, 0.6, 0.02, cfg?.orb?.scale ?? 0.4, (val) => {
-      const c = cfg.orb || (cfg.orb = {}); c.scale = val;
-      if (this.visualizer.setConfig) this.visualizer.setConfig('orb', { scale: val });
-      localStorage.setItem('vizConfig', JSON.stringify(cfg));
-    });
-  }
-
-  // Animation Loop
   update() {
     const mode = this.getVizMode();
     const usingCanvas = mode !== 'video';
@@ -1596,7 +1113,7 @@ export class Renderer {
       this.visualizer.draw();
     }
     if (hasMedia) this.updateProgressBar();
-    this.updateDiagnostics(); // refresh diagnostic overlay if visible
+    this.updateDiagnostics();
     requestAnimationFrame(this._updateLoop);
   }
 
@@ -1643,155 +1160,6 @@ export class Renderer {
   hideErrorBanner() {
     if (!this.errorBanner) return;
     this.errorBanner.classList.add('hidden');
-  }
-
-  // UI fallbacks for non-browser test environments (e.g., jsdom)
-
-
-  // Initialize video overlay events on first run
-  initVideoOverlayHandlers() {
-    if (!this.videoContainer) return;
-    if (this._videoHandlersInit) return;
-    this._videoHandlersInit = true;
-    let overlayTimer = null;
-    const showOverlay = () => {
-      if (this.videoOverlay) this.videoOverlay.classList.remove('hidden');
-      if (overlayTimer) clearTimeout(overlayTimer);
-      overlayTimer = setTimeout(() => {
-        if (this.videoOverlay) this.videoOverlay.classList.add('hidden');
-      }, 2000);
-    };
-    this.videoContainer.addEventListener('mousemove', showOverlay);
-    this.videoContainer.addEventListener('dblclick', () => this.toggleFullscreen());
-    this.videoContainer.addEventListener('click', (e) => {
-      // Clicking empty space toggles playback
-      if (e.target === this.videoContainer) this.togglePlayback();
-    });
-    if (this.videoPlayPauseBtn) {
-      this.videoPlayPauseBtn.addEventListener('click', (e) => { e.stopPropagation(); this.togglePlayback(); });
-    }
-    if (this.videoSeek) {
-      this.videoSeek.addEventListener('input', (e) => {
-        const v = Number(e.target.value) || 0;
-        this.seekTrack(v);
-      });
-    }
-    if (this.videoModeChip) {
-      this.videoModeChip.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const restore = this.prevNonVideoMode || 'orb';
-        if (this.visualizer.setMode) this.visualizer.setMode(restore);
-        this.setVizMode(restore);
-        this.updateVisualizationUi(restore);
-        this.updateVideoModeUi();
-      });
-    }
-  }
-
-  toggleFullscreen() {
-    try {
-      if (document.fullscreenElement) {
-        document.exitFullscreen?.();
-      } else {
-        (this.videoContainer || document.documentElement)?.requestFullscreen?.();
-      }
-    } catch { /* ignore */ }
-  }
-
-  // Chord detection controls
-  toggleChords() {
-    this.chordsEnabled = !this.chordsEnabled;
-    localStorage.setItem('chordsEnabled', this.chordsEnabled);
-    this.updateChordToggleUi();
-    if (!this.chordsEnabled) {
-      this.chordDetector.stop();
-      this.detectorRunning = false;
-      if (this.chordReadout) {
-        this.chordReadout.textContent = '—';
-        this.chordReadout.classList.add('dim');
-        this.chordReadout.style.removeProperty('color');
-        this.chordReadout.style.removeProperty('background');
-        this.chordReadout.style.removeProperty('border-color');
-      }
-    } else {
-      this.startChordDetectorWhenReady();
-    }
-  }
-
-  cycleChordMode() {
-    const order = ['lowcpu', 'responsive', 'normal', 'accurate'];
-    const next = order[(order.indexOf(this.chordMode) + 1) % order.length];
-    this.chordMode = next;
-    this.applyChordMode(next);
-    localStorage.setItem('chordMode', next);
-    this.updateChordToggleUi();
-  }
-
-  applyChordMode(mode) {
-    applyChordModePreset(this.chordDetector, mode, {
-      setChordFftSize: (fftSize) => this.audioManager.setChordFftSize(fftSize),
-      setVisualizerFpsCap: (fpsCap) => { this.visualizer.fpsCap = fpsCap; }
-    });
-  }
-
-  updateChordToggleUi() {
-    if (!this.toggleChordsBtn) return;
-    this.toggleChordsBtn.classList.toggle('inactive', !this.chordsEnabled);
-    const label = (
-      this.chordMode === 'lowcpu' ? 'Low-CPU' :
-      this.chordMode === 'responsive' ? 'Responsive' :
-      this.chordMode === 'accurate' ? 'Accurate' : 'Normal'
-    );
-    this.toggleChordsBtn.title = this.chordsEnabled ? `Chords: ${label} (right-click to change mode)` : 'Chords: Off (click to enable)';
-  }
-
-  // Update diagnostic overlay with live metrics
-  updateDiagnostics() {
-    if (!this.diagEl || this.diagEl.classList.contains('hidden')) return;
-    const { noiseFloor, activeBins, confidence, spectralClarity, dynamicGate, tuningCents = 0 } = this.chordDetector.getDiagnostics();
-    const rms = this.audioManager.getCurrentRms().toFixed(3);
-    const tune = (tuningCents || 0).toFixed(1);
-    const sign = (tuningCents || 0) > 0 ? '+' : '';
-    this.diagEl.textContent = `RMS: ${rms} | noiseFloor: ${noiseFloor.toFixed(3)} | activeBins: ${activeBins} | ` +
-      `clarity: ${spectralClarity.toFixed(2)} | gate: ${dynamicGate.toFixed(3)} | conf: ${confidence.toFixed(2)} | tune: ${sign}${tune}c`;
-  }
-
-  // Video mode: attach current track's video element when selected and available
-  updateVideoModeUi() {
-    try {
-      const mode = this.getVizMode();
-      const isVideoMode = mode === 'video';
-      const track = this.audioManager.getCurrentTrack && this.audioManager.getCurrentTrack();
-      const isVideoTrack = !!(track && track.isVideo && track.audio && track.audio.tagName === 'VIDEO');
-      const canvas = document.getElementById('visualizer');
-      if (!this.videoContainer) return;
-
-      if (isVideoMode && isVideoTrack) {
-        if (canvas) canvas.classList.add('hidden');
-        this.videoContainer.classList.remove('hidden');
-        if (track.audio.parentElement !== this.videoContainer) {
-          this.videoContainer.innerHTML = '';
-          this.videoContainer.appendChild(track.audio);
-        }
-        track.audio.style.display = 'block';
-        track.audio.removeAttribute('controls');
-        track.audio.muted = false;
-        if (this.videoChipText) {
-          const label = (this.prevNonVideoMode || 'orb');
-          const pretty = label[0].toUpperCase() + label.slice(1);
-          this.videoChipText.textContent = `Back to ${pretty}`;
-        }
-      } else {
-        if (canvas) canvas.classList.remove('hidden');
-        this.videoContainer.classList.add('hidden');
-        const vid = this.videoContainer.querySelector('video');
-        if (vid) {
-          vid.style.display = 'none';
-        }
-      }
-    } catch {
-      // best-effort UI update; ignore
-    }
   }
 
   updateProgressBar() {

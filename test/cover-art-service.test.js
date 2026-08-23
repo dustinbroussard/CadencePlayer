@@ -9,7 +9,8 @@ const require = createRequire(import.meta.url);
 const {
   buildCoverArtPayload,
   persistCoverOverride,
-  validateOverrideImagePath
+  validateOverrideImagePath,
+  coverCache
 } = require('../src/js/cover-art-service.cjs');
 
 const tempDirs = [];
@@ -91,5 +92,23 @@ describe('cover-art-service', () => {
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     expect(fs.existsSync(config[trackPath])).toBe(true);
     expect(fs.readFileSync(config[trackPath], 'utf8')).toBe('1024x512');
+  });
+
+  it('caches recently resolved cover art in memory', () => {
+    const root = makeTempDir();
+    const trackPath = path.join(root, 'song2.mp3');
+    fs.writeFileSync(trackPath, '');
+
+    coverCache.clear();
+
+    const payload1 = buildCoverArtPayload(trackPath, {}, root);
+    expect(payload1.source).toBe('placeholder');
+
+    const cacheKey = `${trackPath}::${root}`;
+    const cachedEntry = coverCache.get(cacheKey);
+    expect(cachedEntry).toBe(payload1);
+
+    const payload2 = buildCoverArtPayload(trackPath, {}, root);
+    expect(payload2).toBe(payload1);
   });
 });

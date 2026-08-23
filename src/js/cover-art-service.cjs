@@ -1,9 +1,42 @@
-'use strict';
-
 const { Buffer } = require('buffer');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+
+class SimpleLRUCache {
+  constructor(maxSize = 100) {
+    this.maxSize = maxSize;
+    this.cache = new Map();
+  }
+
+  get(key) {
+    if (!this.cache.has(key)) return null;
+    const value = this.cache.get(key);
+    this.cache.delete(key);
+    this.cache.set(key, value);
+    return value;
+  }
+
+  set(key, value) {
+    if (this.cache.has(key)) {
+      this.cache.delete(key);
+    } else if (this.cache.size >= this.maxSize) {
+      const oldestKey = this.cache.keys().next().value;
+      this.cache.delete(oldestKey);
+    }
+    this.cache.set(key, value);
+  }
+
+  delete(key) {
+    this.cache.delete(key);
+  }
+
+  clear() {
+    this.cache.clear();
+  }
+}
+
+const coverCache = new SimpleLRUCache(100);
 
 const COVER_CONFIG_NAME = 'cover_config.json';
 const COVER_DIR_NAME = 'covers';
@@ -113,42 +146,52 @@ function createPlaceholderDataUrl() {
 }
 
 function buildCoverArtPayload(filePath, common, userDataPath) {
+  const cacheKey = `${filePath}::${userDataPath}`;
+  const cached = coverCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
   const config = loadCoverConfig(userDataPath);
   const overridePath = config[filePath];
+  let payload;
   if (overridePath && fs.existsSync(overridePath)) {
-    return {
+    payload = {
       url: toAppDataUrl(overridePath),
       source: 'override',
       placeholder: false,
       path: overridePath
     };
+  } else {
+    const picture = getEmbeddedPicture(common);
+    if (picture?.data) {
+      payload = {
+        url: `data:${picture.format};base64,${picture.data}`,
+        source: 'embedded',
+        placeholder: false,
+        format: picture.format
+      };
+    } else {
+      const fallbackPath = findDirectoryCover(filePath);
+      if (fallbackPath) {
+        payload = {
+          url: toAppDataUrl(fallbackPath),
+          source: 'directory',
+          placeholder: false,
+          path: fallbackPath
+        };
+      } else {
+        payload = {
+          url: createPlaceholderDataUrl(),
+          source: 'placeholder',
+          placeholder: true
+        };
+      }
+    }
   }
 
-  const picture = getEmbeddedPicture(common);
-  if (picture?.data) {
-    return {
-      url: `data:${picture.format};base64,${picture.data}`,
-      source: 'embedded',
-      placeholder: false,
-      format: picture.format
-    };
-  }
-
-  const fallbackPath = findDirectoryCover(filePath);
-  if (fallbackPath) {
-    return {
-      url: toAppDataUrl(fallbackPath),
-      source: 'directory',
-      placeholder: false,
-      path: fallbackPath
-    };
-  }
-
-  return {
-    url: createPlaceholderDataUrl(),
-    source: 'placeholder',
-    placeholder: true
-  };
+  coverCache.set(cacheKey, payload);
+  return payload;
 }
 
 function validateOverrideImagePath(imagePath) {
@@ -191,6 +234,9 @@ function persistCoverOverride({ userDataPath, trackPath, imagePath, nativeImage 
   config[trackPath] = outPath;
   saveCoverConfig(userDataPath, config);
 
+  const cacheKey = `${trackPath}::${userDataPath}`;
+  coverCache.delete(cacheKey);
+
   return {
     success: true,
     coverArt: {
@@ -209,6 +255,10 @@ function clearCoverOverride({ userDataPath, trackPath }) {
   }
   delete config[trackPath];
   saveCoverConfig(userDataPath, config);
+
+  const cacheKey = `${trackPath}::${userDataPath}`;
+  coverCache.delete(cacheKey);
+
   return { success: true };
 }
 
@@ -223,5 +273,6 @@ module.exports = {
   loadCoverConfig,
   persistCoverOverride,
   saveCoverConfig,
-  validateOverrideImagePath
+  validateOverrideImagePath,
+  coverCache
 };
